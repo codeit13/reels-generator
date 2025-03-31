@@ -81,130 +81,158 @@ class ReelsMaker(BaseEngine):
         return tags
 
     async def start(self) -> StartResponse:
-        await super().start()
+        try:
+            await super().start()
+            
+            # Initialize background_music_path to None
+            self.background_music_path = None
 
-        if self.config.background_audio_url:
-            self.background_music_path = await download_resource(
-                self.cwd, self.config.background_audio_url
+            if self.config.background_audio_url:
+                self.background_music_path = await download_resource(
+                    self.cwd, self.config.background_audio_url
+                )
+            
+            # Check if the background music path is in video_gen_config
+            if self.config.video_gen_config and self.config.video_gen_config.background_music_path:
+                self.background_music_path = self.config.video_gen_config.background_music_path
+                
+            # Log the actual background music path (for debugging)
+            logger.debug(f"Using background music path: {self.background_music_path}")
+            
+            # generate script from prompt
+            try:
+                if self.config.prompt:
+                    logger.debug(f"Generating script from prompt: {self.config.prompt}")
+                    script = await self.generate_script(self.config.prompt)
+                    logger.debug(f"Generated script: {script}")
+                elif self.config.script:
+                    script = self.config.script
+                else:
+                    raise ValueError("No prompt or sentence provided")
+
+                # split script into sentences
+                if script is None:
+                    raise ValueError("Script generation failed - returned None")
+                    
+                sentences = split_by_dot_or_newline(script, 100)
+                sentences = list(filter(lambda x: x != "", sentences))
+            except Exception as e:
+                logger.exception(f"Script generation or processing failed: {e}")
+                raise
+
+            video_paths = []
+            if self.config.video_paths:
+                logger.info("Using video paths from client...")
+                video_paths = self.config.video_paths
+            else:
+                logger.debug("Generating search terms for script...")
+                search_terms = await self.generate_search_terms(
+                    script=script, max_hashtags=10
+                )
+
+                # holds all remote urls
+                remote_urls = []
+
+                max_videos = int(os.getenv("MAX_BG_VIDEOS", 10))
+
+                for search_term in search_terms[:max_videos]:
+                    # search for a related background video
+                    video_path = await self.video_generator.get_video_url(
+                        search_term=search_term
+                    )
+                    if not video_path:
+                        continue
+
+                    remote_urls.append(video_path)
+
+                # download all remote videos at once
+                tasks = []
+                for url in remote_urls:
+                    task = asyncio.create_task(download_resource(self.cwd, url))
+                    tasks.append(task)
+
+                local_paths = await asyncio.gather(*tasks)
+                video_paths.extend(set(local_paths))
+
+            if len(video_paths) == 0:
+                raise ValueError("No video paths found available")
+
+            data: list[TempData] = []
+
+            # for each sentence, generate audio
+            for sentence in sentences:
+                audio_path = await self.synth_generator.synth_speech(sentence)
+                data.append(
+                    TempData(
+                        synth_clip=FileClip(audio_path),
+                    )
+                )
+
+            # Add before calling video_generator.generate_video
+            if not self.background_music_path and hasattr(self, 'video_generator'):
+                logger.warning("No background music path set at ReelsMaker level")
+                # Let video_generator handle this with its own null check
+
+
+
+            # TODO: fix me
+            self.video_generator.config.background_music_path = self.background_music_path
+
+            final_speech = ffmpeg.concat(
+                *[item.synth_clip.ffmpeg_clip for item in data], v=0, a=1
             )
 
-        # generate script from prompt
-        if self.config.prompt:
-            script = await self.generate_script(self.config.prompt)
-        elif self.config.script:
-            script = self.config.script
-        else:
-            raise ValueError("No prompt or sentence provided")
-
-        # split script into sentences
-        assert script is not None, "Script should not be None"
-
-        sentences = split_by_dot_or_newline(script, 100)
-        sentences = list(filter(lambda x: x != "", sentences))
-
-        video_paths = []
-        if self.config.video_paths:
-            logger.info("Using video paths from client...")
-            video_paths = self.config.video_paths
-        else:
-            logger.debug("Generating search terms for script...")
-            search_terms = await self.generate_search_terms(
-                script=script, max_hashtags=10
+            # get subtitles from script
+            subtitles_path = await self.subtitle_generator.generate_subtitles(
+                sentences=sentences,
+                durations=[item.synth_clip.real_duration for item in data],
             )
 
-            # holds all remote urls
-            remote_urls = []
+            # the max duration of the final video
+            video_duration = sum(item.synth_clip.real_duration for item in data)
 
-            max_videos = int(os.getenv("MAX_BG_VIDEOS", 10))
+            # each clip should be 5 seconds long
+            max_clip_duration = 5
 
-            for search_term in search_terms[:max_videos]:
-                # search for a related background video
-                video_path = await self.video_generator.get_video_url(
-                    search_term=search_term
-                )
-                if not video_path:
-                    continue
+            tot_dur: float = 0
 
-                remote_urls.append(video_path)
+            temp_videoclip: list[FileClip] = [
+                FileClip(video_path, t=max_clip_duration) for video_path in video_paths
+            ]
 
-            # download all remote videos at once
-            tasks = []
-            for url in remote_urls:
-                task = asyncio.create_task(download_resource(self.cwd, url))
-                tasks.append(task)
+            final_clips: list[FileClip] = []
 
-            local_paths = await asyncio.gather(*tasks)
-            video_paths.extend(set(local_paths))
+            while tot_dur < video_duration:
+                for clip in temp_videoclip:
+                    remaining_dur = video_duration - tot_dur
+                    subclip_duration = min(
+                        max_clip_duration, remaining_dur, clip.real_duration
+                    )
+                    subclip = FileClip(clip.filepath, t=subclip_duration).duplicate()
 
-        if len(video_paths) == 0:
-            raise ValueError("No video paths found available")
+                    final_clips.append(subclip)
+                    tot_dur += subclip_duration
 
-        data: list[TempData] = []
+                    logger.debug(
+                        f"Total duration after adding this clip: {tot_dur}, target is {video_duration}, clip duration: {subclip_duration}"
+                    )
 
-        # for each sentence, generate audio
-        for sentence in sentences:
-            audio_path = await self.synth_generator.synth_speech(sentence)
-            data.append(
-                TempData(
-                    synth_clip=FileClip(audio_path),
-                )
+                    if tot_dur >= video_duration:
+                        break
+
+            final_video_path = await self.video_generator.generate_video(
+                clips=final_clips,
+                subtitles_path=subtitles_path,
+                speech_filter=final_speech,
+                video_duration=video_duration,
             )
 
-        # TODO: fix me
-        self.video_generator.config.background_music_path = self.background_music_path
+            logger.info((f"Final video: {final_video_path}"))
+            logger.info("video generated successfully!")
 
-        final_speech = ffmpeg.concat(
-            *[item.synth_clip.ffmpeg_clip for item in data], v=0, a=1
-        )
-
-        # get subtitles from script
-        subtitles_path = await self.subtitle_generator.generate_subtitles(
-            sentences=sentences,
-            durations=[item.synth_clip.real_duration for item in data],
-        )
-
-        # the max duration of the final video
-        video_duration = sum(item.synth_clip.real_duration for item in data)
-
-        # each clip should be 5 seconds long
-        max_clip_duration = 5
-
-        tot_dur: float = 0
-
-        temp_videoclip: list[FileClip] = [
-            FileClip(video_path, t=max_clip_duration) for video_path in video_paths
-        ]
-
-        final_clips: list[FileClip] = []
-
-        while tot_dur < video_duration:
-            for clip in temp_videoclip:
-                remaining_dur = video_duration - tot_dur
-                subclip_duration = min(
-                    max_clip_duration, remaining_dur, clip.real_duration
-                )
-                subclip = FileClip(clip.filepath, t=subclip_duration).duplicate()
-
-                final_clips.append(subclip)
-                tot_dur += subclip_duration
-
-                logger.debug(
-                    f"Total duration after adding this clip: {tot_dur}, target is {video_duration}, clip duration: {subclip_duration}"
-                )
-
-                if tot_dur >= video_duration:
-                    break
-
-        final_video_path = await self.video_generator.generate_video(
-            clips=final_clips,
-            subtitles_path=subtitles_path,
-            speech_filter=final_speech,
-            video_duration=video_duration,
-        )
-
-        logger.info((f"Final video: {final_video_path}"))
-        logger.info("video generated successfully!")
-
-        return StartResponse(
-            video_file_path=final_video_path,
-        )
+            return StartResponse(video_file_path=final_video_path)
+            
+        except Exception as e:
+            # Enhanced error logging
+            logger.exception(f"Video generation failed with error: {e}")
+            return None

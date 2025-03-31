@@ -172,8 +172,26 @@ async def main():
                 reels_maker = ReelsMaker(config)
                 output = await reels_maker.start()
                 st.balloons()
-                st.video(output.video_file_path, autoplay=True)
-                st.download_button("Download Reels", output.video_file_path, file_name="reels.mp4")
+
+                # Add a null check before trying to display the video
+                if output is not None and hasattr(output, 'video_file_path'):
+                    st.video(output.video_file_path, autoplay=True)
+                    
+                    # Read the video file once
+                    with open(output.video_file_path, "rb") as file:
+                        video_bytes = file.read()
+                        
+                    # Use the bytes for download without affecting the video player
+                    st.download_button(
+                        "Download Reels", 
+                        video_bytes, 
+                        file_name="reels.mp4",
+                        mime="video/mp4"
+                    )
+                else:
+                    st.error("Video generation failed. Check logs for details.")
+                    # Log the actual configuration for debugging
+                    logger.error(f"Video generation failed with config: {config}")
             except Exception as e:
                 del queue[queue_id]
                 logger.exception(f"removed from queue: {queue_id}: -> {e}")

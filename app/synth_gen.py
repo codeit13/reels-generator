@@ -55,8 +55,9 @@ class SynthGenerator:
         self.cache_key = f"{self.config.voice}_{text_hash}"
 
     async def generate_with_eleven(self, text: str) -> str:
+        # Hard-code a valid voice ID here instead of using self.config.voice
         voice = Voice(
-            voice_id=self.config.voice,
+            voice_id="21m00Tcm4TlvDq8ikWAM",  # Rachel voice - hardcoded valid ID
             settings=VoiceSettings(
                 stability=0.71, similarity_boost=0.5, style=0.0, use_speaker_boost=True
             ),

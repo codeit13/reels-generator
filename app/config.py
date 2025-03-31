@@ -52,11 +52,9 @@ class __Settings(BaseSettings):
 
     IMAGE_PROVIDER: Literal["pollination", "deepinfra", "together"] = "deepinfra"
 
-    TOGETHER_API_KEY: str = Field(None)
-
-    SENTRY_DSN: str = Field(None)
-    
-    OPENAI_MODEL_NAME: str = Field(None)
+    TOGETHER_API_KEY: str | None = Field(default=None)
+    # SENTRY_DSN: str | None = Field(default=None)
+    OPENAI_MODEL_NAME: str | None = Field(default="gpt-3.5-turbo")
 
 
 # all ways use this settings rather than using __Settings()

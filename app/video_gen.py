@@ -68,7 +68,14 @@ class VideoGenerator:
         self.cwd = base_class.cwd
         self.base_engine = base_class
 
-        self.ffmpeg_cmd = os.path.join(os.getcwd(), "bin/ffmpeg")
+        # Try local path first, then fall back to system FFmpeg
+        ffmpeg_local_path = os.path.join(os.getcwd(), "bin/ffmpeg")
+        if os.path.exists(ffmpeg_local_path):
+            self.ffmpeg_cmd = ffmpeg_local_path
+        else:
+            # Fall back to system FFmpeg
+            logger.warning(f"Local FFmpeg not found at {ffmpeg_local_path}, using system FFmpeg")
+            self.ffmpeg_cmd = "ffmpeg"
 
     async def get_video_url(self, search_term: str) -> str | None:
         try:
@@ -138,27 +145,79 @@ class VideoGenerator:
 
     async def generate_video(
         self,
-        clips: list[FileClip],  # the list of clips from ffmpeg
-        speech_filter: FFMPEG_TYPE,
+        clips: list[FileClip],
         subtitles_path: str,
+        speech_filter,
         video_duration: float,
     ) -> str:
+        """Generate video from clips."""
         logger.info("Generating video...")
+        
+        # Add null checks for all file paths
+        if subtitles_path is None:
+            logger.warning("Subtitle path is None, generating video without subtitles")
+            # Proceed without subtitles
+    
+        # Check each clip to ensure it has a valid path
+        valid_clips = []
+        for clip in clips:
+            if clip and clip.filepath:
+                valid_clips.append(clip)
+            else:
+                logger.warning(f"Skipping invalid clip: {clip}")
+    
+        if not valid_clips:
+            raise ValueError("No valid video clips available for processing")
+    
         effects = [zoom_out_effect, zoom_in_effect]
 
         # Define output path
         output_path = (Path(self.cwd) / f"{self.job_id}_final.mp4").as_posix()
 
+        # In video_gen.py, inside generate_video method
+        if self.config.background_music_path is None or not os.path.exists(self.config.background_music_path):
+            logger.warning(f"Background music path not found: {self.config.background_music_path}")
+            
+            # Create a silent audio file in the temp directory instead
+            silent_audio = os.path.join(os.path.dirname(subtitles_path), "silent_audio.mp3")
+            
+            try:
+                # Create a silent audio file using ffmpeg
+                logger.info(f"Generating silent audio file at {silent_audio}")
+                (
+                    ffmpeg.input('anullsrc', f='lavfi', t=10)
+                    .output(silent_audio, ar=44100)
+                    .run(overwrite_output=True, cmd=self.ffmpeg_cmd, quiet=True)
+                )
+                self.config.background_music_path = silent_audio
+            except Exception as e:
+                logger.exception(f"Failed to create silent audio: {e}")
+                # Proceed without background music by creating an input with silence
+                # We'll handle this in the ffmpeg pipeline
+
         # music must end at the end of the speech, add extra 3 seconds to make it look good
-        music_input = ffmpeg.input(
-            adjust_audio_to_target_dBFS(self.config.background_music_path),
-            t=video_duration,
-        )
+        try:
+            # First try to use the background music file
+            if self.config.background_music_path and os.path.exists(self.config.background_music_path):
+                logger.info(f"Using background music: {self.config.background_music_path}")
+                music_input = ffmpeg.input(
+                    adjust_audio_to_target_dBFS(self.config.background_music_path),
+                    t=video_duration,
+                )
+            else:
+                # If no background music, generate silent audio directly with ffmpeg
+                logger.warning("Creating silent audio track directly with ffmpeg")
+                music_input = ffmpeg.input('anullsrc', f='lavfi', t=video_duration)
+        except Exception as e:
+            logger.exception(f"Background music processing failed: {e}")
+            # Fallback to silent audio in case of any failure
+            logger.warning("Using fallback silent audio")
+            music_input = ffmpeg.input('anullsrc', f='lavfi', t=video_duration)
 
         if self.base_engine.config.video_type == "motivational":
             effects = []
 
-        video_stream = self.concatenate_clips(clips, effects)
+        video_stream = self.concatenate_clips(valid_clips, effects)
         video_stream = self.apply_watermark(video_stream)
         video_stream = self.apply_subtitle(video_stream, subtitles_path)
         video_stream = self.add_audio_mix(
@@ -174,7 +233,12 @@ class VideoGenerator:
             acodec="aac",
             preset="veryfast",
             threads=2,
-            # loglevel="quiet",
+            # Add only these two simple parameters for compatibility
+            pix_fmt="yuv420p",      # Standard pixel format
+            movflags="+faststart"   # Optimizes for web streaming
+            # Remove the problematic profile and level parameters            
+            # profile_v="main",       # Use underscore instead of colon!
+            # level="3.1"             # Compatibility level # loglevel="quiet"
         )
 
         logger.debug(f"FFMPEG CMD: {output.get_args()}")

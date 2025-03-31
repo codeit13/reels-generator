@@ -1,0 +1,53 @@
+services:
+  reelsmaker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # args:
+      #   - DOPPLER_TOKEN=${DOPPLER_TOKEN}
+    ports:
+      - "7501:7501"
+    volumes:
+      - ./tmp:/app/tmp
+      - ./images:/app/images
+    environment:      
+      - BACKGROUND_MUSIC_PATH=/app/assets/music
+      - BACKGROUND_MUSIC_ENABLED=false
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - VOICE_PROVIDER=elevenlabs
+      - VOICE=21m00Tcm4TlvDq8ikWAM      
+      - VOICE_ID=21m00Tcm4TlvDq8ikWAM
+      - ELEVENLABS_VOICE=21m00Tcm4TlvDq8ikWAM
+      - ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM
+      - DEFAULT_VOICE=21m00Tcm4TlvDq8ikWAM
+      - DEFAULT_VOICE_ID=21m00Tcm4TlvDq8ikWAM
+      - PEXELS_API_KEY=${PEXELS_API_KEY}
+      - MAX_BG_VIDEOS=${MAX_BG_VIDEOS}
+      - CUDA_ENABLED=true
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:32,garbage_collection_threshold:0.8
+      - PYTORCH_ENABLE_CPU_FALLBACK=1
+      - OMP_NUM_THREADS=4
+      - MKL_NUM_THREADS=4
+      - NUMEXPR_NUM_THREADS=4
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+        limits:
+          memory: 3800M
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:7501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    name: app-network
