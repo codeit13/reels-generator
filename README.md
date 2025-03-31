@@ -1,4 +1,4 @@
-> 🔥 I indend to turn this into a full-fleged project in the future, please contact me if you want to collaborate.
+> note: I forked this and dockerized it for gpu.  I'll update README soon.
 
 ## ReelsMaker
 
