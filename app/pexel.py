@@ -3,37 +3,94 @@ from loguru import logger
 import requests
 
 
-async def search_for_stock_videos(query: str, limit: int, min_dur: int) -> list[str]:
-    headers = {
-        "Authorization": os.getenv("PEXELS_API_KEY"),
+async def search_for_stock_videos(
+    limit: int = 5, 
+    min_dur: int = 10, 
+    query: str = "nature",
+    orientation: str = None) -> list[str]:
+    """
+    Search for stock videos on Pexels with orientation filtering.
+    
+    Args:
+        orientation: "portrait", "landscape", or "square"
+    """
+    # Get API key
+    PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY")
+    
+    if not PEXELS_API_KEY:
+        logger.error("PEXELS_API_KEY not found in environment variables")
+        return []
+    
+    headers = {"Authorization": PEXELS_API_KEY}
+    qurl = f"https://api.pexels.com/videos/search"
+    
+    # Add orientation to query parameters
+    params = {
+        "query": query,
+        "per_page": limit * 2,  # Request more to ensure we have enough after filtering
+        "min_duration": min_dur
     }
-
-    qurl = f"https://api.pexels.com/videos/search?query={query}&per_page={limit}"
-
-    r = requests.get(qurl, headers=headers)
+    
+    # Add orientation parameter if specified
+    if orientation:
+        params["orientation"] = orientation
+        logger.info(f"Searching for {orientation} videos matching '{query}'")
+    
+    r = requests.get(qurl, headers=headers, params=params)
     response = r.json()
-
-    raw_urls = []
+    
+    if not response.get("videos"):
+        logger.warning(f"No videos found for query '{query}' with orientation '{orientation}'")
+        return []
+    
+    # Additional filtering to ensure correct aspect ratio
     video_urls = []
-    video_res = 0
-
+    
     try:
-        for i in range(limit):
-            if response["videos"][i]["duration"] < min_dur:
+        for video in response["videos"]:
+            if video["duration"] < min_dur:
                 continue
-            raw_urls = response["videos"][i]["video_files"]
-            temp_video_url = ""
-
-            for video in raw_urls:
-                if ".com/video-files" in video["link"]:
-                    if (video["width"] * video["height"]) > video_res:
-                        temp_video_url = video["link"]
-                        video_res = video["width"] * video["height"]
-
-            if temp_video_url != "":
-                video_urls.append(temp_video_url)
-
+                
+            # Get the highest quality video URL
+            raw_urls = video["video_files"]
+            best_video = None
+            max_resolution = 0
+            
+            for v in raw_urls:
+                if ".com/video-files" not in v["link"]:
+                    continue
+                    
+                # Get dimensions and verify orientation
+                width, height = v["width"], v["height"]
+                video_orientation = get_orientation(width, height)
+                
+                # Skip if orientation doesn't match requested orientation
+                if orientation and video_orientation != orientation:
+                    continue
+                    
+                resolution = width * height
+                if resolution > max_resolution:
+                    max_resolution = resolution
+                    best_video = v["link"]
+            
+            if best_video:
+                video_urls.append(best_video)
+                
+            # Break if we have enough videos
+            if len(video_urls) >= limit:
+                break
+                
     except Exception as e:
-        logger.error(f"Error Searching for video: {e}")
-
+        logger.error(f"Error processing videos: {e}")
+    
     return video_urls
+
+def get_orientation(width, height):
+    """Determine video orientation based on dimensions"""
+    ratio = width / height
+    if ratio > 1.2:  # Wider than tall
+        return "landscape"
+    elif ratio < 0.8:  # Taller than wide
+        return "portrait"
+    else:
+        return "square"  # Close to square

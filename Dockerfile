@@ -47,6 +47,8 @@ RUN poetry install --no-root --no-interaction --no-ansi
 # Download and install the spaCy language model
 RUN python -m spacy download en_core_web_sm
 
+
+
 EXPOSE 7501
 
 HEALTHCHECK CMD curl --fail http://localhost:7501/_stcore/health

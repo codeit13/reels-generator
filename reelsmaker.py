@@ -8,7 +8,7 @@ from loguru import logger
 import streamlit as st
 from streamlit.runtime.uploaded_file_manager import UploadedFile
 from app.reels_maker import ReelsMaker, ReelsMakerConfig
-from app.synth_gen import VOICE_PROVIDER, SynthConfig
+from app.synth_gen import SynthConfig
 from app.video_gen import VideoGeneratorConfig
 
 
@@ -99,13 +99,56 @@ async def main():
 
     col4, col5, col6 = st.columns(3)
     with col4:
-        stroke_width = st.number_input("Stroke width", value=2, step=1, min_value=1)
+        stroke_width = st.number_input("Border", value=1, step=1, min_value=1)
 
     with col5:
         fontsize = st.number_input("Font size", value=80, step=1, min_value=1)
 
     with col6:
         subtitles_position = st.selectbox("Subtitles position", ["center,center"])
+
+    # For video quality settings
+    st.divider()
+    st.subheader("Video Processing Options")
+
+# Add after other video settings but before the nvenc_preset selection
+    st.subheader("Video Format")
+    aspect_ratio = st.selectbox(
+        "Aspect Ratio",
+        options=[
+            "Landscape (16:9) - YouTube/Facebook", 
+            "Portrait (9:16) - Instagram/TikTok",             
+            "Square (1:1) - Instagram"
+        ],
+        index=0,  # Default to portrait for reels
+        help="Choose the aspect ratio based on your target platform"
+    )
+
+    # Extract just the ratio value for the config
+    aspect_ratio_map = {
+        "Portrait (9:16) - Instagram/TikTok": "9:16",
+        "Landscape (16:9) - YouTube/Facebook": "16:9",
+        "Square (1:1) - Instagram": "1:1"
+    }
+    aspect_ratio_value = aspect_ratio_map[aspect_ratio]
+
+
+
+    # Add NVENC preset selection
+    nvenc_preset = st.select_slider(
+        "Video Quality",
+        options=["Fastest (Low Quality)", "Balanced", "Highest Quality"],
+        value="Balanced",
+        help="Higher quality takes longer but produces better results"
+    )
+
+    # Convert to actual preset values
+    preset_mapping = {
+        "Fastest (Low Quality)": "p1", 
+        "Balanced": "p4",
+        "Highest Quality": "p7"
+    }
+    nvenc_preset = preset_mapping[nvenc_preset]
 
     # text_color = st.color_picker("Text color", value="#ffffff")
     cpu_count = multiprocessing.cpu_count()
@@ -125,8 +168,10 @@ async def main():
         # create config
         config = ReelsMakerConfig(
             job_id="".join(str(uuid4()).split("-")),
+            video_type="narrator",
+            prompt=prompt or sentence,
+            cwd=cwd,
             background_audio_url=background_audio_url,
-            prompt=prompt,
             video_gen_config=VideoGeneratorConfig(
                 bg_color=str(bg_color),
                 fontsize=int(fontsize),
@@ -135,20 +180,15 @@ async def main():
                 subtitles_position=str(subtitles_position),
                 text_color=str(text_color),
                 threads=int(threads),
-                # watermark_path="images/watermark.png",
+                nvenc_preset=nvenc_preset,
+                aspect_ratio=aspect_ratio_value  # Add this line
+                # watermark_path="images/watermark.png"
             ),
             synth_config=SynthConfig(
                 voice=str(voice),
-                voice_provider=typing.cast(VOICE_PROVIDER, voice_provider or "tiktok"),
-            ),
+                voice_provider=os.environ.get("VOICE_PROVIDER") or voice_provider or "tiktok",
+            )
         )
-
-        # read all uploaded files and save in a path
-        if uploaded_videos:
-            config.video_paths = [
-                await download_to_path(dest=os.path.join(config.cwd, p.name), buff=p)
-                for p in uploaded_videos
-            ]
 
         # read uploaded file and save in a path
         if uploaded_audio:
@@ -156,8 +196,13 @@ async def main():
                 dest=os.path.join(config.cwd, "background.mp3"), buff=uploaded_audio
             )
 
-        print(f"starting reels maker: {config.model_dump_json()}")
+        if uploaded_videos:
+            config.video_paths = [
+                await download_to_path(dest=os.path.join(config.cwd, p.name), buff=p)
+                for p in uploaded_videos
+            ]
 
+        print(f"starting reels maker: {config.model_dump_json()}")
         st.write(
             "This process is CPU-intensive and will take a considerable time to complete"
         )
@@ -165,14 +210,14 @@ async def main():
             try:
                 if len(queue.items()) > 1:
                     raise Exception("queue is full - someone else is generating reels")
-
+                
                 logger.debug("Added to queue")
                 queue[queue_id] = config
-
+                
                 reels_maker = ReelsMaker(config)
                 output = await reels_maker.start()
                 st.balloons()
-
+                
                 # Add a null check before trying to display the video
                 if output is not None and hasattr(output, 'video_file_path'):
                     st.video(output.video_file_path, autoplay=True)
@@ -180,7 +225,7 @@ async def main():
                     # Read the video file once
                     with open(output.video_file_path, "rb") as file:
                         video_bytes = file.read()
-                        
+                    
                     # Use the bytes for download without affecting the video player
                     st.download_button(
                         "Download Reels", 
@@ -193,9 +238,26 @@ async def main():
                     # Log the actual configuration for debugging
                     logger.error(f"Video generation failed with config: {config}")
             except Exception as e:
-                del queue[queue_id]
-                logger.exception(f"removed from queue: {queue_id}: -> {e}")
-                st.error(e)
+                # More specific error message patterns
+                error_msg = str(e)
+                if "ffmpeg" in error_msg.lower():
+                    st.error(f"Video processing error: {e}. Please check logs for details.")
+                elif "api key" in error_msg.lower():
+                    st.error("API key error. Please check your environment variables.")
+                else:
+                    st.error(f"Error generating video: {e}")
+
+
+# # Add this to display diagnostics in the UI
+# if st.sidebar.button("Run System Diagnostics"):
+#     with st.spinner("Running diagnostics..."):
+#         # Create temporary instance of ReelsMaker to run diagnostics
+#         temp_config = ReelsMakerConfig(job_id="diagnostics", video_type="test")
+#         diag_maker = ReelsMaker(temp_config)
+#         diagnostics = asyncio.run(diag_maker.run_diagnostics())
+        
+#         # Display results
+#         st.sidebar.json(diagnostics)
 
 
 if __name__ == "__main__":
