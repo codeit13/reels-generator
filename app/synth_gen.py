@@ -19,8 +19,9 @@ VOICE_PROVIDER = Literal["elevenlabs", "tiktok", "openai", "airforce"]
 
 
 class SynthConfig(BaseModel):
-    voice_provider: VOICE_PROVIDER = "tiktok"
-    voice: str = "en_us_007"
+    # I don't like this line
+    voice_provider: VOICE_PROVIDER = "elevenlabs"
+    voice: str = "pNInz6obpgDQGcFmaJgB" # Ellie
 
     static_mode: bool = False
     """ if we're generating static audio for test """
@@ -55,9 +56,14 @@ class SynthGenerator:
         self.cache_key = f"{self.config.voice}_{text_hash}"
 
     async def generate_with_eleven(self, text: str) -> str:
-        # Hard-code a valid voice ID here instead of using self.config.voice
-        voice = Voice(
-            voice_id="21m00Tcm4TlvDq8ikWAM",  # Rachel voice - hardcoded valid ID
+        # Prioritize config.voice over environment variable
+        voice_id = self.config.voice or os.environ.get("VOICE") or "21m00Tcm4TlvDq8ikWAM"
+        
+        # Add logging for debugging
+        logger.info(f"Using ElevenLabs voice_id: {voice_id}")
+        
+        voice = Voice(                        
+            voice_id=voice_id,  # Fix syntax error here
             settings=VoiceSettings(
                 stability=0.71, similarity_boost=0.5, style=0.0, use_speaker_boost=True
             ),
@@ -72,9 +78,15 @@ class SynthGenerator:
         return self.speech_path
 
     async def generate_with_tiktok(self, text: str) -> str:
-        tiktokvoice.tts(text, voice=str(self.config.voice), filename=self.speech_path)
-
-        return self.speech_path
+        try:
+            result = tiktokvoice.tts(text, voice=str(self.config.voice), filename=self.speech_path)
+            # Check if the file was actually created
+            if not os.path.exists(self.speech_path) or os.path.getsize(self.speech_path) == 0:
+                raise ValueError("TikTok voice generation failed to create audio file")
+            return self.speech_path
+        except Exception as e:
+            logger.error(f"TikTok voice generation error: {e}")
+            raise
 
     async def cache_speech(self, text: str):
         try:
@@ -99,6 +111,40 @@ class SynthGenerator:
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(4), after=log_attempt_number) # type: ignore
     async def synth_speech(self, text: str) -> str:
+        # Add state tracking for failed providers
+        if not hasattr(self, '_failed_providers'):
+            self._failed_providers = set()
+        
+        try:
+            # Skip if this provider has already failed
+            if self.config.voice_provider.lower() in self._failed_providers:
+                logger.warning(f"Skipping previously failed provider: {self.config.voice_provider}")
+                # Use TikTok as fallback
+                old_provider = self.config.voice_provider
+                self.config.voice_provider = "tiktok"
+                try:
+                    return await self._synth_with_provider(text)
+                finally:
+                    self.config.voice_provider = old_provider
+                
+            # Attempt with configured provider
+            return await self._synth_with_provider(text)
+        except Exception as e:
+            logger.error(f"Primary voice provider failed: {e}")
+            # Mark this provider as failed
+            self._failed_providers.add(self.config.voice_provider.lower())
+            
+            # Switch to fallback provider
+            old_provider = self.config.voice_provider
+            self.config.voice_provider = "tiktok"  # Use TikTok as fallback
+            logger.info(f"Switching to fallback voice provider: {self.config.voice_provider}")
+            try:
+                return await self._synth_with_provider(text)
+            finally:
+                # Restore original setting
+                self.config.voice_provider = old_provider
+
+    async def _synth_with_provider(self, text: str) -> str:
         self.text = text
         self.set_speech_props()
 
@@ -113,13 +159,13 @@ class SynthGenerator:
 
         genarator = None
 
-        if self.config.voice_provider == "openai":
+        if self.config.voice_provider.lower() == "openai":
             genarator = self.generate_with_openai
-        elif self.config.voice_provider == "airforce":
+        elif self.config.voice_provider.lower() == "airforce":
             genarator = self.generate_with_airforce
-        elif self.config.voice_provider == "tiktok":
+        elif self.config.voice_provider.lower() == "tiktok":
             genarator = self.generate_with_tiktok
-        elif self.config.voice_provider == "elevenlabs":
+        elif self.config.voice_provider.lower() == "elevenlabs":
             genarator = self.generate_with_eleven
         else:
             raise ValueError(

@@ -1,7 +1,5 @@
 import os
-
-import os
-
+import json
 from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,7 +16,6 @@ audios_cache_path = os.path.join(parent, "cache/audios_cache")
 images_cache_path = os.path.join(parent, "cache/images_cache")
 fonts_cache_path = os.path.join(parent, "cache/fonts_cache")
 llm_cache_path = os.path.join(parent, "cache/llm_cache")
-
 
 def ensure_caches():
     os.makedirs(videos_cache_path, exist_ok=True)
@@ -49,16 +46,22 @@ load_dotenv(env_file)
 class __Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=env_file, extra="ignore")
 
-
     IMAGE_PROVIDER: Literal["pollination", "deepinfra", "together"] = "deepinfra"
-
-    TOGETHER_API_KEY: str | None = Field(default=None)
-    # SENTRY_DSN: str | None = Field(default=None)
+    TOGETHER_API_KEY: str | None = Field(default=None)    
     OPENAI_MODEL_NAME: str | None = Field(default="gpt-3.5-turbo")
-
+    # SENTRY_DSN: str | None = Field(default=None)
 
 # all ways use this settings rather than using __Settings()
 settings = __Settings()  # type: ignore
 
 if not mode == "production":
-    logger.debug(settings.model_dump_json(indent=3))
+    # us pass and comment out the code below it when disabling logging
+    # pass
+    # Create a safe version of settings without API keys
+    safe_settings = settings.model_dump()
+    # Remove sensitive keys
+    for key in list(safe_settings.keys()):
+        if "API_KEY" in key or "KEY" in key:
+            safe_settings[key] = "***REDACTED***"
+    # Log the safe version correctly
+    logger.debug(json.dumps(safe_settings, indent=3))

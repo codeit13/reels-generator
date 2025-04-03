@@ -27,7 +27,7 @@ from app.utils.path_util import download_resource
 
 
 class ReelsMakerConfig(BaseGeneratorConfig):
-    pass
+    max_videos: int = 3  # Add this field with default value
 
 
 def create_concat_file(clips):
@@ -72,23 +72,15 @@ class ReelsMaker(BaseEngine):
         super().__init__(config)
         self.config = config
         
-        # Force GPU usage if available
-        if TORCH_AVAILABLE:
-            try:
-                if torch.cuda.is_available():
-                    device_count = torch.cuda.device_count()
-                    device_name = torch.cuda.get_device_name(0)
-                    logger.info(f"Found {device_count} CUDA devices. Using: {device_name}")
-                    
-                    # Force PyTorch to use CUDA
-                    torch.set_default_tensor_type('torch.cuda.FloatTensor')
-                    
-                    # Set environment variable for other libraries
-                    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-                else:
-                    logger.warning("CUDA not available, using CPU")
-            except Exception as e:
-                logger.exception(f"Error setting up CUDA: {e}")
+        # Ensure voice provider is properly set in synth_generator config
+        if hasattr(self, 'synth_generator') and hasattr(self.synth_generator, 'config'):
+            # Make sure voice_provider is explicitly set from config
+            if hasattr(self.config, 'voice_provider') and self.config.voice_provider:
+                self.synth_generator.config.voice_provider = self.config.voice_provider
+                logger.info(f"Setting voice provider to: {self.config.voice_provider}")
+
+        # Just log that we're using CPU
+        logger.info("Using CPU for processing (no CUDA)")
 
     async def _generate_script_internal(self, prompt: str) -> str:
         """Internal method to generate a script from the prompt."""
@@ -107,7 +99,10 @@ class ReelsMaker(BaseEngine):
             else:
                 # Fall back to a simple approach if none of the expected methods exist
                 logger.warning("Could not find appropriate method in prompt_generator")
-                return f"Let's explore {prompt}. {prompt} is something that affects us all."
+                
+                # this is the source of the duplication of prompt as entered in motivational quote
+                # return f"Let's explore {prompt}. {prompt} is something that affects us all."
+                return f"{prompt}"
         except Exception as e:
             logger.exception(f"Internal script generation failed: {e}")
             return ""
@@ -127,18 +122,18 @@ class ReelsMaker(BaseEngine):
             # Validate script content
             if not script or script.strip() == "":
                 logger.error(f"Generated empty script from prompt: {prompt}")
-                # Fallback to using the prompt as the script
-                return f"Here's a fact about {prompt}. {prompt} is an interesting topic worth exploring."
+                # Fallback without repeating the prompt
+                return f"Here's an interesting thought to consider. Every journey begins with a single step."
                 
             logger.info(f"Successfully generated script: {script[:50]}...")
             return script
             
         except asyncio.TimeoutError:
             logger.error(f"Script generation timed out for prompt: {prompt}")
-            return f"Here's a thought about {prompt}. {prompt} is something we should consider."
+            return f"Life is full of wonderful opportunities. Make the most of each moment."
         except Exception as e:
             logger.exception(f"Script generation failed: {e}")
-            return f"Let me tell you about {prompt}. It's a fascinating subject."
+            return f"The path to success is through persistence and determination."
 
     async def generate_search_terms(self, script, max_hashtags: int = 5):
         logger.debug("Generating search terms for script...")
@@ -151,22 +146,35 @@ class ReelsMaker(BaseEngine):
         logger.info(f"Generated search terms: {tags}")
         return tags
 
-    async def start(self) -> StartResponse:
+    async def start(self, st_state=None) -> StartResponse:
         try:
             await super().start()
             
+            # Add periodic cancellation checks
+            if st_state and self.check_cancellation(st_state):
+                raise Exception("Processing cancelled by user")
+
             # Initialize background_music_path to None
             self.background_music_path = None
 
-            if self.config.background_audio_url:
-                self.background_music_path = await download_resource(
-                    self.cwd, self.config.background_audio_url
-                )
-            
-            # Check if the background music path is in video_gen_config
+            # Priority order: config.video_gen_config.background_music_path first, then background_audio_url
             if self.config.video_gen_config and self.config.video_gen_config.background_music_path:
                 self.background_music_path = self.config.video_gen_config.background_music_path
-                
+                logger.info(f"Using background music from video_gen_config: {self.background_music_path}")
+            elif self.config.background_audio_url:
+                try:
+                    self.background_music_path = await download_resource(
+                        self.cwd, self.config.background_audio_url
+                    )
+                    logger.info(f"Downloaded background music from URL: {self.background_music_path}")
+                except Exception as e:
+                    logger.error(f"Failed to download background music: {e}")
+                    self.background_music_path = None
+
+            # Set the path in video_generator config
+            if hasattr(self, 'video_generator') and hasattr(self.video_generator, 'config'):
+                self.video_generator.config.background_music_path = self.background_music_path
+            
             # Log the actual background music path (for debugging)
             logger.debug(f"Using background music path: {self.background_music_path}")
             
@@ -204,7 +212,7 @@ class ReelsMaker(BaseEngine):
                 # holds all remote urls
                 remote_urls = []
 
-                max_videos = int(os.getenv("MAX_BG_VIDEOS", 10))
+                max_videos = self.config.max_videos if hasattr(self.config, 'max_videos') else int(os.getenv("MAX_BG_VIDEOS", 3))
 
                 for search_term in search_terms[:max_videos]:
                     # search for a related background video
@@ -219,14 +227,25 @@ class ReelsMaker(BaseEngine):
                 # download all remote videos at once
                 tasks = []
                 for url in remote_urls:
-                    task = asyncio.create_task(download_resource(self.cwd, url))
+                    # Add timeout to prevent hanging on slow downloads
+                    task = asyncio.create_task(
+                        asyncio.wait_for(
+                            download_resource(self.cwd, url),
+                            timeout=60  # 60 second timeout for downloads
+                        )
+                    )
                     tasks.append(task)
 
-                local_paths = await asyncio.gather(*tasks)
-                video_paths.extend(set(local_paths))
+                try:
+                    local_paths = await asyncio.gather(*tasks, return_exceptions=True)
+                    # Filter out exceptions and keep only successful downloads
+                    local_paths = [path for path in local_paths if not isinstance(path, Exception)]
+                    video_paths.extend(set(local_paths))
+                except Exception as e:
+                    logger.error(f"Error downloading videos: {e}")
 
             if not video_paths:
-                logger.warning("No video paths found, using default videos")
+                logger.warning("No video paths found, attempting to use default videos")
                 
                 # Try to load default videos from the assets directory
                 default_videos_dir = os.path.join(os.getcwd(), "assets", "default_videos")
@@ -274,20 +293,29 @@ class ReelsMaker(BaseEngine):
                 logger.warning("No background music path set at ReelsMaker level")
                 # Let video_generator handle this with its own null check
 
-
-
-            # TODO: fix me
-            self.video_generator.config.background_music_path = self.background_music_path
-
             final_speech = ffmpeg.concat(
                 *[item.synth_clip.ffmpeg_clip for item in data], v=0, a=1
             )
 
-            # get subtitles from script
-            subtitles_path = await self.subtitle_generator.generate_subtitles(
-                sentences=sentences,
-                durations=[item.synth_clip.real_duration for item in data],
-            )
+            try:
+                # get subtitles from script
+                subtitles_path = await self.subtitle_generator.generate_subtitles(
+                    sentences=sentences,
+                    durations=[item.synth_clip.real_duration for item in data],
+                )
+            except Exception as e:
+                logger.error(f"Failed to generate subtitles: {e}")
+                # Create a simple empty subtitles file as fallback
+                subtitles_path = os.path.join(self.cwd, "fallback_subtitles.srt")
+                with open(subtitles_path, "w") as f:
+                    f.write("1\n00:00:00,000 --> 00:10:00,000\n\n")
+
+            # Before calling video_generator.generate_video
+            if not self.validate_subtitles_file(subtitles_path):
+                logger.warning("Creating fallback subtitles file")
+                subtitles_path = os.path.join(self.cwd, "fallback_subtitles.srt")
+                with open(subtitles_path, "w") as f:
+                    f.write("1\n00:00:00,000 --> 00:10:00,000\n\n")
 
             # the max duration of the final video
             video_duration = sum(item.synth_clip.real_duration for item in data)
@@ -312,7 +340,32 @@ class ReelsMaker(BaseEngine):
 
             final_clips: list[FileClip] = []
 
-            while tot_dur < video_duration:
+            if not temp_videoclip or all(clip.real_duration <= 0 for clip in temp_videoclip):
+                logger.warning("All video clips have zero duration, creating fallback clip")
+                # Create a fallback clip or handle the error appropriately
+                blank_video = os.path.join(self.cwd, "blank_video.mp4")
+                try:
+                    # Create a 15-second blank video with ffmpeg
+                    black_cmd = [
+                        self.video_generator.ffmpeg_cmd,
+                        "-f", "lavfi", 
+                        "-i", "color=c=black:s=1080x1920:d=15", 
+                        "-c:v", "libx264",
+                        "-pix_fmt", "yuv420p",
+                        "-t", "15",
+                        blank_video
+                    ]
+                    subprocess.run(black_cmd, check=True)
+                    temp_videoclip = [FileClip(blank_video, t=max_clip_duration)]
+                except Exception as e:
+                    logger.exception(f"Failed to create blank video: {e}")
+                    raise ValueError("Unable to create video: no source videos available")
+
+            # Add max iterations safety for the duration loop
+            max_iterations = 1000  # Prevent infinite loop
+            iteration_count = 0
+            while tot_dur < video_duration and iteration_count < max_iterations:
+                iteration_count += 1
                 for clip in temp_videoclip:
                     remaining_dur = video_duration - tot_dur
                     subclip_duration = min(
@@ -330,6 +383,12 @@ class ReelsMaker(BaseEngine):
                     if tot_dur >= video_duration:
                         break
 
+            if iteration_count >= max_iterations:
+                logger.warning(f"Hit maximum iterations ({max_iterations}) when building video")
+
+            if st_state and self.check_cancellation(st_state):
+                raise Exception("Processing cancelled by user")
+            
             final_video_path = await self.video_generator.generate_video(
                 clips=final_clips,
                 subtitles_path=subtitles_path,
@@ -337,15 +396,28 @@ class ReelsMaker(BaseEngine):
                 video_duration=video_duration,
             )
 
-            logger.info((f"Final video: {final_video_path}"))
-            logger.info("video generated successfully!")
-
-            return StartResponse(video_file_path=final_video_path)
+            # Verify the output file exists and has content
+            if os.path.exists(final_video_path) and os.path.getsize(final_video_path) > 0:
+                logger.info(f"Final video: {final_video_path}")
+                logger.info("Video generated successfully!")
+                # After generating the final video, clean up large objects:
+                # Add this before returning the final response:
+                final_clips.clear()  # Release memory
+                if hasattr(self, 'cleanup_temp_files'):
+                    self.cleanup_temp_files()
+                return StartResponse(video_file_path=final_video_path)
+            else:
+                logger.error(f"Output file missing or empty: {final_video_path}")
+                return None
             
         except Exception as e:
             # Enhanced error logging
             logger.exception(f"Video generation failed with error: {e}")
             return None
+        finally:
+            # Make sure to reset generation state if passed from UI
+            if st_state:
+                st_state["is_generating"] = False
 
     async def run_diagnostics(self):
         """Run system diagnostics to validate environment"""
@@ -353,7 +425,7 @@ class ReelsMaker(BaseEngine):
             "ffmpeg_version": None,
             "python_version": sys.version,
             "temp_dir_writable": None,
-            "gpu_info": None
+            "gpu_info": "Not using GPU acceleration"  # Simplify this
         }
         
         # Check FFmpeg
@@ -377,34 +449,6 @@ class ReelsMaker(BaseEngine):
         except Exception as e:
             diagnostics["temp_dir_writable"] = f"Error: {str(e)}"
         
-        # Check GPU
-        try:
-            if TORCH_AVAILABLE:
-                # Only access torch if it's available
-                if torch.cuda.is_available():
-                    diagnostics["gpu_info"] = {
-                        "device_name": torch.cuda.get_device_name(0),
-                        "device_count": torch.cuda.device_count(),
-                        "memory_allocated": f"{torch.cuda.memory_allocated(0)/1024**3:.2f} GB",
-                        "memory_reserved": f"{torch.cuda.memory_reserved(0)/1024**3:.2f} GB",
-                        "cuda_version": torch.version.cuda,
-                    }
-                else:
-                    diagnostics["gpu_info"] = "CUDA not available"
-            else:
-                # Check for GPU using system commands if torch is not available
-                try:
-                    # Try nvidia-smi as a fallback
-                    result = subprocess.run(["nvidia-smi"], capture_output=True, text=True)
-                    if result.returncode == 0:
-                        diagnostics["gpu_info"] = "NVIDIA GPU detected (via nvidia-smi)"
-                    else:
-                        diagnostics["gpu_info"] = "No NVIDIA GPU detected"
-                except:
-                    diagnostics["gpu_info"] = "PyTorch not installed, GPU detection limited"
-        except Exception as e:
-            diagnostics["gpu_info"] = f"Error checking GPU: {str(e)}"
-        
         # Report results
         logger.info(f"System diagnostics: {diagnostics}")
         return diagnostics
@@ -421,3 +465,58 @@ class ReelsMaker(BaseEngine):
             logger.info(f"Cleaned up {len(files_to_delete)} temporary files")
         except Exception as e:
             logger.warning(f"Error cleaning up temporary files: {e}")
+
+    # Add this method to check subtitle file before using it
+    def validate_subtitles_file(self, subtitles_path):
+        """Ensure the subtitles file doesn't contain any potential issues."""
+        if not os.path.exists(subtitles_path):
+            return False
+            
+        try:
+            # Check if the file has content
+            if os.path.getsize(subtitles_path) == 0:
+                logger.warning("Empty subtitles file detected")
+                return False
+                
+            # Check content for potential issues
+            with open(subtitles_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                
+            # Basic validation - file should have timing markers
+            if '-->' not in content:
+                logger.warning("Invalid subtitles format: missing timing markers")
+                return False
+                
+            # Test for potential encoding issues
+            try:
+                for line in content.splitlines():
+                    line.encode('utf-8')  # Just to test if there are any encoding issues
+            except UnicodeEncodeError:
+                logger.warning("Subtitles file contains invalid UTF-8 characters")
+                return False
+                
+            return True
+        except Exception as e:
+            logger.error(f"Error validating subtitles file: {e}")
+            return False
+
+    def download_videos(self, prompt):
+        # Get max videos from environment or config
+        max_bg_videos = int(os.getenv("MAX_BG_VIDEOS", 20))
+        
+        # Use the smaller of the two values (config and env var)
+        max_videos_to_download = min(
+            self.config.max_videos if hasattr(self.config, 'max_videos') else max_bg_videos,
+            max_bg_videos
+        )
+
+    def check_cancellation(self, st_state):
+        """Check if cancellation was requested in the Streamlit UI"""
+        if st_state.get("cancel_requested", False):
+            logger.info("Cancellation requested, stopping processing")
+            return True
+        return False
+
+    async def run_processing(self, st_state):
+        if self.check_cancellation(st_state):  # Fixed: use the passed st_state parameter
+            raise Exception("Processing cancelled by user")

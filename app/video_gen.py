@@ -39,7 +39,7 @@ positions = {
 
 
 class VideoGeneratorConfig(BaseModel):
-    fontsize: int = 70
+    fontsize: int = 80
     stroke_color: str = "#ffffff"
     text_color: str = "#ffffff"
     stroke_width: int | None = 5
@@ -48,7 +48,7 @@ class VideoGeneratorConfig(BaseModel):
     subtitles_position: str = "center,center"
     threads: int = multiprocessing.cpu_count()
 
-    watermark_path_or_text: str | None = "VoidFace"
+    watermark_path_or_text: str | None = "Now Here Nowhere"
     watermark_opacity: float = 0.5
     watermark_type: Literal["image", "text", "none"] = "text"
     background_music_path: str | None = None
@@ -58,7 +58,7 @@ class VideoGeneratorConfig(BaseModel):
     """ aspect ratio of the video """
 
     color_effect: str = "gray"
-    nvenc_preset: str = "p1"  # Options: p1 (fastest) through p7 (highest quality)
+    cpu_preset: str = "ultrafast"  # Options: ultrafast, superfast, veryfast, faster, fast, medium
 
 
 class VideoGenerator:
@@ -347,52 +347,54 @@ class VideoGenerator:
             tts_audio_filter=speech_filter,
             background_music_filter=music_input,
         )
-
-        # Add NVIDIA hardware acceleration to FFmpeg output
         try:
-            # First try NVENC
-            logger.info("Attempting to use GPU acceleration with NVENC")
+            # Use CPU encoding instead of GPU
+            logger.info("Using CPU encoding for video processing")
             output = (
                 ffmpeg
                 .output(
                     video_stream,
                     output_path,
-                    vcodec="h264_nvenc",
+                    vcodec="libx264",  # CPU encoder instead of h264_nvenc
                     acodec="aac",
-                    preset=self.config.nvenc_preset,
+                    preset="ultrafast",  # CPU-friendly preset
+                    crf=28,  # Lower quality but faster (range 18-28)
                     pix_fmt="yuv420p",
                     movflags="+faststart"
                 )
                 .global_args('-progress', 'pipe:1')
             )
             
-            logger.debug(f"FFMPEG CMD: {output.get_args()}")
+            # Run the encoding command
+            logger.info(f"Starting video generation with {self.config.threads} threads")
             output.run(overwrite_output=True, cmd=self.ffmpeg_cmd)
             
+            return output_path
         except Exception as e:
-            # Log the error and fall back to CPU encoding
-            logger.warning(f"GPU acceleration failed: {e}. Falling back to CPU encoding.")
-            
-            # CPU fallback with libx264
-            output = (
-                ffmpeg
-                .output(
-                    video_stream,
-                    output_path,
-                    vcodec="libx264",  # CPU encoding 
-                    acodec="aac",
-                    preset="medium",  # CPU preset - medium is a good balance
-                    pix_fmt="yuv420p",
-                    movflags="+faststart"
+            logger.error(f"Error during video generation: {e}")
+            # Try fallback with even lower quality settings
+            try:
+                logger.warning("Trying fallback encoding with lower quality")
+                output = (
+                    ffmpeg
+                    .output(
+                        video_stream,
+                        output_path,
+                        vcodec="libx264",
+                        acodec="aac",
+                        preset="veryfast",
+                        crf=30,
+                        pix_fmt="yuv420p",
+                        movflags="+faststart"
+                    )
+                    .global_args('-progress', 'pipe:1')
                 )
-                .global_args('-progress', 'pipe:1')
-            )
-            
-            logger.debug(f"Fallback CPU encoding: {output.get_args()}")
-            output.run(overwrite_output=True, cmd=self.ffmpeg_cmd)
+                output.run(overwrite_output=True, cmd=self.ffmpeg_cmd)
+                return output_path
+            except Exception as fallback_error:
+                logger.error(f"Fallback encoding failed: {fallback_error}")
+                raise
 
-        logger.info("Video generation complete.")
-        return output_path
 
     # def get_background_audio(self, video_clip: VideoClip, song_path: str) -> AudioClip:
     #     """Takes the original audio and adds the background audio"""
