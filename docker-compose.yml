@@ -1,5 +1,7 @@
 services:
-  reelsmaker:
+  app:
+    container_name: reelsmaker 
+
     build:
       context: .
       dockerfile: Dockerfile
@@ -30,13 +32,20 @@ services:
       retries: 3
     
     networks:
-      - app-network
-    
+      reels-network:
+        aliases:
+          - reelsmaker
+      crown-network:
+        aliases:
+          - reelsmaker
+        
     command: >
       bash -c "
         streamlit run reelsmaker.py --server.port=7501 --server.address=0.0.0.0
       "
 
 networks:
-  app-network:
-    name: app-network
+  reels-network:  
+    driver: bridge
+  crown-network:
+    external: true

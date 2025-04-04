@@ -9,6 +9,8 @@ __pycache__/
 *.db
 *.srt
 *.json
+*.ps1
+*.wsl
 
 cache/
 archive/
