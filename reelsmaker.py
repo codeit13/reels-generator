@@ -5,7 +5,6 @@ import typing
 import time
 import threading
 from uuid import uuid4
-
 from loguru import logger
 import streamlit as st
 from streamlit.runtime.uploaded_file_manager import UploadedFile
@@ -20,8 +19,6 @@ import os.path
 st.session_state.setdefault("last_video_path", None)
 if "last_video_bytes" not in st.session_state:
     st.session_state["last_video_bytes"] = None
-
-
 
 if "queue" not in st.session_state:
     st.session_state["queue"] = {}
@@ -82,7 +79,6 @@ def format_elapsed_time(seconds):
     seconds = seconds % 60
     return f"{minutes}m {seconds}s"
 
-
 async def main():
     # Add this line at the beginning of main()
     cwd = os.path.join(os.getcwd(), "tmp")
@@ -125,90 +121,72 @@ async def main():
 
 
     with st.expander("Voice Configuration Info", expanded=True):
-        # st.write("### Voice Configuration Info")
-        # st.write(f"**Provider:** {voice_provider}")
-        # st.write(f"**Voice ID:** {voice}")
-
-        # Create a more detailed voice selection system
+        # Initialize voice provider options and descriptions
+        voice_providers = ["Kokoro", "Elevenlabs", "TikTok"]
+        provider_descriptions = {
+            "Kokoro": "Local AI voice model with many high-quality voices",
+            "Elevenlabs": "Professional quality voices (requires API key)",
+            "TikTok": "Free voice service from TikTok"
+        }
+        
+        # Voice provider selection with descriptions
+        voice_provider_index = 0  # Default to Kokoro
         voice_provider = st.selectbox(
             "Select voice provider", 
-            ["Elevenlabs","TikTok"]
+            options=voice_providers,
+            index=voice_provider_index,
+            format_func=lambda x: f"{x} - {provider_descriptions[x]}"
         )
+        
+        # Load Kokoro voices for the dropdown
+        if "kokoro_voices" not in st.session_state:
+            from app.kokoro_service import kokoro_client
+            st.session_state["kokoro_voices"] = kokoro_client.get_voices()
 
         # Different voice options based on selected provider
-        if voice_provider.lower() == "tiktok":  # Add .lower() to ensure case-insensitive comparison
+        if voice_provider.lower() == "tiktok":
+            # Existing TikTok voice options
             voice = st.selectbox(
-                "Choose a TikTok voice", 
-                [
-                    "en_male_narration", 
-                    "en_us_001",
-                    "en_us_002",  # Male
-                    "en_us_006",  # Female
-                    "en_us_009",  # Female
-                    "en_us_010"   # Male
-                ]
+                "Select voice",
+                ["en_us_001", "en_us_006", "en_us_007", "en_us_009", "en_us_010"]
             )
-        else:  # elevenlabs
+        elif voice_provider.lower() == "kokoro":
+            # Display Kokoro voices
+            kokoro_voices = st.session_state["kokoro_voices"]
+            
+            # Group voices by language for better organization
+            languages = {}
+            for v in kokoro_voices:
+                name = v["name"]
+                language = name.split(" ")[0]  # Extract language from name
+                if language not in languages:
+                    languages[language] = []
+                languages[language].append(v)
+            
+            # Let user select language first
+            language_options = sorted(languages.keys())
+            selected_language = st.selectbox("Select language", language_options)
+            
+            # Then select a voice from that language
+            filtered_voices = languages[selected_language]
+            voice_options = [(v["id"], v["name"]) for v in filtered_voices]
+            
+            selected_voice_tuple = st.selectbox(
+                "Select voice", 
+                options=voice_options,
+                format_func=lambda x: x[1]  # Display the name
+            )
+            
+            voice = selected_voice_tuple[0]  # Use the ID for the API
+        else:
+            # Existing Elevenlabs voice options
             voice = st.selectbox(
-                "Choose an ElevenLabs voice", 
-                [
-                    "21m00Tcm4TlvDq8ikWAM",     # Rachel
-                    "2EiwWnXFnvU5JabPnv8n",     # Clyde
-                    "D38z5RcWu1voky8WS1ja",     # Adam                    
-                    "XB0fDUnXU5powFXDhCwa",     # Josh
-                    "pNInz6obpgDQGcFmaJgB",     # "Elli (Female)",
-                    "jBpfuIE2acCO8z3wKNLl",     # "Bella (Female)",
-                    "onwK4e9ZLuTAKqWW03F9",     # "Thomas (Male)",
-                    "g5CIjZEefAph4nQFvHAz",     # "Daniel (Male)",
-                    "IKne3meq5aSn9XLyUdCD",     # Antoni
-                    "ErXwobaYiN019PkySvjV"     # "Antoni 2 (Male)"  # Newer Antoni
-                ],
-                format_func=lambda x: {
-                    "21m00Tcm4TlvDq8ikWAM": "Rachel (Female)",
-                    "2EiwWnXFnvU5JabPnv8n": "Clyde (Male)",
-                    "D38z5RcWu1voky8WS1ja": "Adam (Male)",                    
-                    "XB0fDUnXU5powFXDhCwa": "Josh (Male)",
-                    "pNInz6obpgDQGcFmaJgB": "Elli (Female)",
-                    "jBpfuIE2acCO8z3wKNLl": "Bella (Female)",
-                    "onwK4e9ZLuTAKqWW03F9": "Thomas (Male)",
-                    "g5CIjZEefAph4nQFvHAz": "Daniel (Male)",
-                    "IKne3meq5aSn9XLyUdCD": "Antoni (Male)",
-                    "ErXwobaYiN019PkySvjV": "Antoni 2 (Male)"  # Newer Antoni
-                }.get(x, x)
+                "Select voice",
+                ["21m00Tcm4TlvDq8ikWAM", "2EiwWnXFnvU5JabPnv8n", "D38z5RcWu1voky8WS1ja", 
+                 "IKne3meq5aSn9XLyUdCD", "XB0fDUnXU5powFXDhCwa", "pNInz6obpgDQGcFmaJgB", 
+                 "jBpfuIE2acCO8z3wKNLl", "onwK4e9ZLuTAKqWW03F9", "g5CIjZEefAph4nQFvHAz", 
+                 "ErXwobaYiN019PkySvjV"]
             )
-
-        # Display voice configuration info (moved outside expander to avoid nesting)        
-        st.write(f"**Provider:** {voice_provider}")
-        st.write(f"**Voice ID:** {voice}")
-
-        # For ElevenLabs, show the human-readable name
-        if voice_provider.lower() == "elevenlabs":
-            voice_names = {
-                "21m00Tcm4TlvDq8ikWAM": "Rachel (Female)",
-                "2EiwWnXFnvU5JabPnv8n": "Clyde (Male)",
-                "D38z5RcWu1voky8WS1ja": "Adam (Male)",
-                "IKne3meq5aSn9XLyUdCD": "Antoni (Male)",
-                "XB0fDUnXU5powFXDhCwa": "Josh (Male)",
-                "pNInz6obpgDQGcFmaJgB": "Elli (Female)",
-                "jBpfuIE2acCO8z3wKNLl": "Bella (Female)",
-                "onwK4e9ZLuTAKqWW03F9": "Thomas (Male)",
-                "g5CIjZEefAph4nQFvHAz": "Daniel (Male)",
-                "ErXwobaYiN019PkySvjV": "Antoni (Male)"
-            }
-            st.write(f"**Voice Name:** {voice_names.get(voice, 'Unknown')}")
-
-        # Show environment overrides if present
-        env_provider = os.environ.get("VOICE_PROVIDER")
-        env_voice = os.environ.get("VOICE")
-
-        if env_provider:
-            st.warning(f"⚠️ Environment override for provider: {env_provider}")
-        if env_voice:
-            st.warning(f"⚠️ Environment override for voice: {env_voice}")
-
-
-
-
 
     # First expander for Inputs section
     with st.expander("Inputs (Video, Audio & Voice)", expanded=False):
@@ -286,9 +264,6 @@ async def main():
         with col6:
             subtitles_position = st.selectbox("Subtitles position", ["center,center"])
 
-
-
-
     # Second expander for Video Processing options
     with st.expander("Video Processing Options", expanded=False):
         st.subheader("Video Format")
@@ -310,8 +285,6 @@ async def main():
             "Square (1:1) - Instagram": "1:1"
         }
         aspect_ratio_value = aspect_ratio_map[aspect_ratio]
-
-
 
         # Change the video quality slider to use CPU presets
         video_quality = st.select_slider(
@@ -433,10 +406,6 @@ async def main():
                 st.session_state["cancel_requested"] = True
                 st.warning("Cancellation requested. Please wait for the current operation to complete...")
 
-
-
-
-
             with st.spinner("Generating reels, this will take ~5mins or less..."):
                 try:
                     # Timer update logic
@@ -487,10 +456,6 @@ async def main():
                     st.session_state["timer_running"] = False
                     st.error(f"Error: {str(e)}")
                     logger.exception(f"Generation failed: {e}")
-
-
-
-
 
         if os.path.exists(cwd):
             try:

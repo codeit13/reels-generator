@@ -2,7 +2,7 @@ tmp/
 subtitles/*.srt
 *.mp3,*.mp4
 *.webm
-
+assets/*
 __pycache__/
 *.log
 .env
@@ -11,6 +11,8 @@ __pycache__/
 *.json
 *.ps1
 *.wsl
+
+ps*
 
 cache/
 archive/

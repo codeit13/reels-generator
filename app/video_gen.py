@@ -268,11 +268,14 @@ class VideoGenerator:
         """Generate video from clips."""
         logger.info("Generating video...")
         
+        # Debug the content of speech_filter to identify None values
+        logger.debug(f"Speech filter type: {type(speech_filter)}")
+        
         # Add null checks for all file paths
         if subtitles_path is None:
             logger.warning("Subtitle path is None, generating video without subtitles")
             # Proceed without subtitles
-    
+
         # Check each clip to ensure it has a valid path
         valid_clips = []
         for clip in clips:
@@ -280,10 +283,10 @@ class VideoGenerator:
                 valid_clips.append(clip)
             else:
                 logger.warning(f"Skipping invalid clip: {clip}")
-    
+
         if not valid_clips:
             raise ValueError("No valid video clips available for processing")
-    
+
         effects = [zoom_out_effect, zoom_in_effect]
 
         # Define output path

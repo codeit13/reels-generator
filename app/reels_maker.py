@@ -288,20 +288,28 @@ class ReelsMaker(BaseEngine):
                     )
                 )
 
+            # Filter out any None values from audio_clips
+            audio_clips = [clip for clip in data if clip.synth_clip is not None]
+
+            if not audio_clips:
+                # Handle the case where all audio generation failed
+                logger.error("All audio generation failed, cannot proceed with video creation")
+                return StartResponse(success=False, error="Failed to generate any audio files")
+
             # Add before calling video_generator.generate_video
             if not self.background_music_path and hasattr(self, 'video_generator'):
                 logger.warning("No background music path set at ReelsMaker level")
                 # Let video_generator handle this with its own null check
 
             final_speech = ffmpeg.concat(
-                *[item.synth_clip.ffmpeg_clip for item in data], v=0, a=1
+                *[item.synth_clip.ffmpeg_clip for item in audio_clips], v=0, a=1
             )
 
             try:
                 # get subtitles from script
                 subtitles_path = await self.subtitle_generator.generate_subtitles(
                     sentences=sentences,
-                    durations=[item.synth_clip.real_duration for item in data],
+                    durations=[item.synth_clip.real_duration for item in audio_clips],
                 )
             except Exception as e:
                 logger.error(f"Failed to generate subtitles: {e}")
@@ -318,13 +326,32 @@ class ReelsMaker(BaseEngine):
                     f.write("1\n00:00:00,000 --> 00:10:00,000\n\n")
 
             # the max duration of the final video
-            video_duration = sum(item.synth_clip.real_duration for item in data)
+            video_duration = sum(item.synth_clip.real_duration for item in audio_clips)
             logger.info(f"Calculated video duration: {video_duration} seconds")
+
+            # Add debug logging for audio files
+            logger.debug(f"Calculated video duration: {video_duration}")
+            logger.debug(f"Audio clips count: {len(audio_clips)}")
+            for i, item in enumerate(audio_clips):
+                if hasattr(item, 'synth_clip') and hasattr(item.synth_clip, 'filepath'):
+                    audio_path = item.synth_clip.filepath
+                    # Check if audio_path is None before using it
+                    if audio_path is not None:
+                        logger.debug(f"Audio clip {i} path: {audio_path}")
+                        logger.debug(f"  - Exists: {os.path.exists(audio_path)}")
+                        logger.debug(f"  - Size: {os.path.getsize(audio_path) if os.path.exists(audio_path) else 'N/A'}")
+                    else:
+                        logger.debug(f"Audio clip {i} path is None")
+                    logger.debug(f"  - Duration: {item.synth_clip.real_duration}")
 
             # Set a minimum video duration
             MIN_VIDEO_DURATION = 15  # seconds
             if video_duration < MIN_VIDEO_DURATION:
-                factor = MIN_VIDEO_DURATION / video_duration
+                if video_duration <= 0:
+                    logger.warning(f"Invalid video duration: {video_duration}, using minimum duration")
+                    factor = 1.0  # Use a default factor of 1.0 (no scaling)
+                else:
+                    factor = MIN_VIDEO_DURATION / video_duration
                 logger.info(f"Video too short ({video_duration}s), extending by factor {factor:.2f}")
                 # We'll slow down each clip to meet the minimum duration
                 video_duration = MIN_VIDEO_DURATION
@@ -389,6 +416,15 @@ class ReelsMaker(BaseEngine):
             if st_state and self.check_cancellation(st_state):
                 raise Exception("Processing cancelled by user")
             
+            # Add to video_gen.py:generate_video before running ffmpeg
+            # Debug all inputs to identify which one is None
+            for i, input_item in enumerate(final_clips):  # Adjust variable name as needed
+                logger.debug(f"Input {i}: {input_item} (type: {type(input_item)})")
+                if hasattr(input_item, 'filepath'):
+                    logger.debug(f"  - filepath: {input_item.filepath}")
+                elif isinstance(input_item, str):
+                    logger.debug(f"  - filepath exists: {os.path.exists(input_item)}")
+
             final_video_path = await self.video_generator.generate_video(
                 clips=final_clips,
                 subtitles_path=subtitles_path,

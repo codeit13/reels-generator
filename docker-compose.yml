@@ -10,12 +10,14 @@ services:
     volumes:
       - ./tmp:/app/tmp
       - ./images:/app/images
+      - ./kokoro_voices.json:/app/kokoro_voices.json  # Mount the voices file
     environment:      
       - BACKGROUND_MUSIC_PATH=/app/assets/music
       - BACKGROUND_MUSIC_ENABLED=false
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}      
-      - VOICE_PROVIDER=elevenlabs      
+      - VOICE_PROVIDER=kokoro  # Set default voice provider to Kokoro
+      - KOKORO_SERVICE_URL=http://kokoro_service:8880  # URL for the service
       - PEXELS_API_KEY=${PEXELS_API_KEY}
       - MAX_BG_VIDEOS=${MAX_BG_VIDEOS}
       # CPU optimization settings

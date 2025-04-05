@@ -1,0 +1,47 @@
+services:
+  # Kokoro service using the specific image
+  kokoro_service:
+    image: ghcr.io/remsky/kokoro-fastapi-gpu:v0.2.2
+    container_name: kokoro_service_test
+    networks:
+      - kokoro_test_network
+    ports:
+      - "9880:8880"
+    environment:
+      - PORT=8880
+    restart: unless-stopped
+    # Add GPU settings if needed
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # Test app using your latest reelsmaker-app image
+  test_app:
+    image: reelsmaker-app:latest
+    container_name: kokoro_test_app
+    networks:
+      - kokoro_test_network
+    volumes:
+      - ./:/app
+      - ./data/kokoro_voices.json:/app/kokoro_voices.json
+      - ./data/elevenlabs_voices.json:/app/elevenlabs_voices.json
+      - ./data/tiktok_voices.json:/app/tiktok_voices.json
+    environment:
+      - VOICE_PROVIDER=kokoro  # Change this to switch providers
+      - KOKORO_SERVICE_URL=http://kokoro_service_test:8880
+      - ELEVENLABS_SERVICE_URL=https://api.elevenlabs.io/v1
+      - TIKTOK_SERVICE_URL=https://tiktok-tts.weilnet.workers.dev/api/generation
+    ports:
+      - "7505:7505"
+    command: streamlit run /app/kokoro_test_app.py --server.port=7505 --server.address=0.0.0.0
+    depends_on:
+      - kokoro_service
+
+# Define the network
+networks:
+  kokoro_test_network:
+    driver: bridge

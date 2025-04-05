@@ -1,7 +1,5 @@
 import os
 import shutil
-import json
-import re
 from typing import Literal, Optional
 from enum import Enum
 from uuid import uuid4
@@ -24,11 +22,9 @@ VOICE_PROVIDER = Literal["kokoro", "elevenlabs", "tiktok", "openai", "airforce"]
 
 class VoiceProvider(str, Enum):
     """Voice provider enum."""
-    KOKORO = "kokoro"
+    KOKORO = "kokoro"  # Add Kokoro as a provider
     ELEVENLABS = "elevenlabs"
     TIKTOK = "tiktok"
-    OPENAI = "openai"  # Add missing providers
-    AIRFORCE = "airforce"
 
 class SynthConfig(BaseModel):
     """Synthesis configuration."""
@@ -89,81 +85,6 @@ class SynthGenerator:
 
         return self.speech_path
 
-    # Add this method to the SynthGenerator class
-    def is_valid_voice(self, provider: VoiceProvider, voice: str) -> bool:
-        """Check if the selected voice is valid for the current provider.
-        
-        Args:
-            provider: The voice provider to check against
-            voice: The voice ID to validate
-            
-        Returns:
-            bool: True if the voice is valid for the provider, False otherwise
-        """
-        try:
-            # Load the appropriate voice list based on provider
-            voices_path = None
-            
-            # First, try to find the provider's voices JSON file
-            potential_paths = [
-                os.path.join(os.path.dirname(__file__), "..", "data", f"{provider.value}_voices.json"),
-                os.path.join("/app", f"{provider.value}_voices.json")
-            ]
-            
-            for path in potential_paths:
-                if os.path.exists(path):
-                    voices_path = path
-                    break
-            
-            if voices_path:
-                logger.debug(f"Loading voice list from {voices_path}")
-                with open(voices_path, 'r') as f:
-                    data = json.load(f)
-                    voice_list = data.get("voices", []) if isinstance(data, dict) else data
-                    
-                    # Check if the voice is in the list
-                    if voice in voice_list:
-                        logger.info(f"Voice '{voice}' is valid for provider {provider}")
-                        return True
-                    else:
-                        logger.warning(f"Voice '{voice}' not found in list for provider {provider}")
-                        return False
-            
-            # If we couldn't find a voice list file, use provider-specific validation
-            if provider == VoiceProvider.KOKORO:
-                # For Kokoro, validate voice format (typically follows pattern like "af_alloy")
-                kokoro_pattern = re.compile(r'^[a-z]{1,2}_[a-z]+$')
-                is_valid = bool(kokoro_pattern.match(voice))
-                logger.info(f"Kokoro voice validation by pattern: {voice} -> {is_valid}")
-                return is_valid
-                
-            elif provider == VoiceProvider.ELEVENLABS:
-                # For ElevenLabs, check if it's a known voice or a valid UUID format
-                elevenlabs_default_voices = [
-                    "Rachel", "Domi", "Bella", "Antoni", "Arnold",
-                    "21m00Tcm4TlvDq8ikWAM", "2EiwWnXFnvU5JabPnv8n"
-                ]
-                uuid_pattern = re.compile(r'^[0-9a-zA-Z]{20,22}$')
-                is_valid = voice in elevenlabs_default_voices or bool(uuid_pattern.match(voice))
-                logger.info(f"ElevenLabs voice validation: {voice} -> {is_valid}")
-                return is_valid
-                
-            elif provider == VoiceProvider.TIKTOK:
-                # For TikTok, voices typically follow a pattern like "en_us_001"
-                tiktok_pattern = re.compile(r'^[a-z]{2}_[a-z]{2}_\d{3}$')
-                is_valid = bool(tiktok_pattern.match(voice))
-                logger.info(f"TikTok voice validation by pattern: {voice} -> {is_valid}")
-                return is_valid
-            
-            # For other providers, assume valid
-            logger.warning(f"No validation available for provider {provider}, assuming voice '{voice}' is valid")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error validating voice: {e}")
-            # On error, assume it's valid and let the provider's API handle validation
-            return True
-    
     async def generate_with_tiktok(self, text: str) -> str:
         try:
             result = tiktokvoice.tts(text, voice=str(self.config.voice), filename=self.speech_path)
@@ -289,40 +210,25 @@ class SynthGenerator:
 
         logger.info(f"Synthesizing text: {text}")
 
-        # Use the enum directly for better type safety
-        provider = self.config.voice_provider
-        voice = self.config.voice
-        
-        # Validate the voice before proceeding
-        if not self.is_valid_voice(provider, voice):
-            logger.warning(f"Voice '{voice}' is not valid for provider {provider}. Using default voice.")
-            # Use a default voice for the selected provider
-            if provider == VoiceProvider.KOKORO:
-                self.config.voice = "af_alloy"
-            elif provider == VoiceProvider.ELEVENLABS:
-                self.config.voice = "Rachel"
-            elif provider == VoiceProvider.TIKTOK:
-                self.config.voice = "en_us_001"
-            elif provider == VoiceProvider.OPENAI:
-                self.config.voice = "alloy"
-            elif provider == VoiceProvider.AIRFORCE:
-                self.config.voice = "default"
-            # Update speech props with new voice
-            self.set_speech_props()
-        
-        if provider == VoiceProvider.KOKORO:
-            generator = self.generate_with_kokoro
-        elif provider == VoiceProvider.ELEVENLABS:
-            generator = self.generate_with_eleven  
-        elif provider == VoiceProvider.TIKTOK:
-            generator = self.generate_with_tiktok                        
-        elif provider == VoiceProvider.OPENAI:
-            generator = self.generate_with_openai
-        elif provider == VoiceProvider.AIRFORCE:
-            generator = self.generate_with_airforce 
-        else:
-            raise ValueError(f"Voice provider '{provider}' is not recognized")
+        genarator = None
 
-        speech_path = await generator(text)
+        if self.config.voice_provider.lower() == "openai":
+            genarator = self.generate_with_openai
+        elif self.config.voice_provider.lower() == "airforce":
+            genarator = self.generate_with_airforce
+        elif self.config.voice_provider.lower() == "tiktok":
+            genarator = self.generate_with_tiktok
+        elif self.config.voice_provider.lower() == "elevenlabs":
+            genarator = self.generate_with_eleven
+        elif self.config.voice_provider.lower() == "kokoro":
+            genarator = self.generate_with_kokoro
+        else:
+            raise ValueError(
+                f"voice provider {self.config.voice_provider} is not recognized"
+            )
+
+        speech_path = await genarator(text)
+
         await self.cache_speech(text)
+
         return speech_path

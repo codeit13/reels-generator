@@ -65,6 +65,7 @@ VOICES = [
     "en_female_emotional",  # peaceful
 ]
 
+# TODO: swap 1 and 0 in the list to use the second endpoint by default
 ENDPOINTS = [
     "https://tiktok-tts.weilnet.workers.dev/api/generation",
     "https://tiktoktts.com/api/tiktok-tts",
