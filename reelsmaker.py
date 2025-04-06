@@ -30,6 +30,22 @@ if "job_timestamps" not in st.session_state:
 queue: dict[str, ReelsMakerConfig] = st.session_state["queue"]
 job_timestamps = st.session_state["job_timestamps"]  # Reference the timestamps dict
 
+# Add this near the top of your main() function, right after where session state variables are defined
+
+# Make sure we load Kokoro voices at startup and cache them in session_state
+if "kokoro_voices" not in st.session_state:
+    try:
+        from app.kokoro_service import kokoro_client
+        kokoro_voices = kokoro_client.get_voices()
+        if kokoro_voices:
+            st.session_state["kokoro_voices"] = kokoro_voices
+            logger.info(f"Loaded {len(kokoro_voices)} Kokoro voices")
+        else:
+            st.session_state["kokoro_voices"] = []
+            logger.warning("No Kokoro voices returned from service")
+    except Exception as e:
+        st.session_state["kokoro_voices"] = []
+        logger.error(f"Failed to load Kokoro voices: {e}")
 
 # Add to reelsmaker.py where the queue is defined
 def clear_queue():
@@ -165,7 +181,8 @@ async def main():
             
             # Let user select language first
             language_options = sorted(languages.keys())
-            selected_language = st.selectbox("Select language", language_options)
+            default_language_index = language_options.index("English") if "English" in language_options else 0
+            selected_language = st.selectbox("Select language", language_options, index=default_language_index)
             
             # Then select a voice from that language
             filtered_voices = languages[selected_language]
@@ -178,6 +195,10 @@ async def main():
             )
             
             voice = selected_voice_tuple[0]  # Use the ID for the API
+            
+            if not kokoro_voices or not languages:
+                st.warning("Unable to load Kokoro voices. Using default voice.")
+                voice = "af_alloy"  # Default fallback voice
         else:
             # Existing Elevenlabs voice options
             voice = st.selectbox(

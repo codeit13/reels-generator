@@ -10,7 +10,7 @@ services:
     volumes:
       - ./tmp:/app/tmp
       - ./images:/app/images
-      - ./kokoro_voices.json:/app/kokoro_voices.json  # Mount the voices file
+      - ./data:/app/data  # Mount the whole data directory instead
     environment:      
       - BACKGROUND_MUSIC_PATH=/app/assets/music
       - BACKGROUND_MUSIC_ENABLED=false
