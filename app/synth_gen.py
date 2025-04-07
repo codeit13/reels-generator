@@ -19,6 +19,7 @@ from app.config import speech_cache_path
 from app.utils.path_util import search_file, text_to_sha256_hash
 from app.kokoro_service import kokoro_client
 from tenacity import retry, stop_after_attempt, wait_fixed
+from pydub import AudioSegment
 
 VOICE_PROVIDER = Literal["kokoro", "elevenlabs", "tiktok", "openai", "airforce"]
 
@@ -37,6 +38,7 @@ class SynthConfig(BaseModel):
 
     static_mode: bool = False
     """ if we're generating static audio for test """
+    sentence_pause: float = 0.0  # Pause duration between sentences
 
 
 class SynthGenerator:
@@ -89,10 +91,15 @@ class SynthGenerator:
 
         return self.speech_path
 
-    # Add this method to the SynthGenerator class
+    # Update the is_valid_voice method
     def is_valid_voice(self, provider: VoiceProvider, voice: str) -> bool:
         """Check if the selected voice is valid for the current provider."""
         try:
+            # First handle None or empty voices
+            if not voice:
+                logger.warning(f"Empty voice provided for {provider}. Using default voice.")
+                return False
+                
             if provider == VoiceProvider.KOKORO:
                 # Get the list of valid Kokoro voices
                 from app.kokoro_service import kokoro_client
@@ -100,20 +107,14 @@ class SynthGenerator:
                 return any(v["id"] == voice for v in voice_options) or voice == "af_alloy"
             elif provider == VoiceProvider.ELEVENLABS:
                 # Basic validation for Elevenlabs voices
-                return voice is not None and len(voice) > 0
+                return len(voice) > 0
             elif provider == VoiceProvider.TIKTOK:
                 # Basic validation for TikTok voices
                 tiktok_voices = ["en_us_001", "en_us_006", "en_us_007", "en_us_009", "en_us_010"]
                 return voice in tiktok_voices
-            elif provider == VoiceProvider.OPENAI:
-                # Basic validation for OpenAI voices
-                return voice is not None and len(voice) > 0
-            elif provider == VoiceProvider.AIRFORCE:
-                # Basic validation for Airforce voices
-                return voice is not None and len(voice) > 0
             else:
-                # For unknown providers, just check if voice ID isn't empty
-                return voice is not None and len(voice) > 0
+                # For other providers, just check if voice ID isn't empty
+                return len(voice) > 0
         except Exception as e:
             logger.warning(f"Voice validation error: {e}, defaulting to allow voice")
             return True  # Allow it by default if validation fails
@@ -197,6 +198,11 @@ class SynthGenerator:
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(4), after=log_attempt_number) # type: ignore
     async def synth_speech(self, text: str) -> str:
+        # Add text validation
+        if not text or text.strip() == "":
+            logger.warning("Empty text provided for speech synthesis. Using placeholder.")
+            text = "No text was provided."  # Use a placeholder text instead
+        
         # Add state tracking for failed providers
         if not hasattr(self, '_failed_providers'):
             self._failed_providers = set()
@@ -231,6 +237,14 @@ class SynthGenerator:
                 self.config.voice_provider = old_provider
 
     async def _synth_with_provider(self, text: str) -> str:
+        # Double-check that text is not empty
+        if not text or text.strip() == "":
+            text = "No text was provided."
+        
+        if self.config.sentence_pause > 0:
+            # Add pause markers between sentences
+            text = re.sub(r'([.!?]) ', r'\1' + (' ' * int(self.config.sentence_pause * 10)) + ' ', text)
+        
         self.text = text
         self.set_speech_props()
 
@@ -278,5 +292,23 @@ class SynthGenerator:
             raise ValueError(f"Voice provider '{provider}' is not recognized")
 
         speech_path = await generator(text)
+        
+        # After generating the speech audio
+        if self.config.sentence_pause > 0:
+            # Split audio at sentence boundaries
+            sentence_audios = split_audio_at_sentences(speech_path, text)
+            
+            # Create silence segment
+            silence_duration = int(self.config.sentence_pause * 1000)  # ms
+            silence = AudioSegment.silent(duration=silence_duration)
+            
+            # Join with silences between segments
+            final_audio = sentence_audios[0]
+            for segment in sentence_audios[1:]:
+                final_audio += silence + segment
+            
+            # Save the new audio
+            final_audio.export(self.speech_path, format="mp3")
+
         await self.cache_speech(text)
-        return speech_path
+        return self.speech_path

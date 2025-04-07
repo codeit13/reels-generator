@@ -11,6 +11,11 @@ services:
       - ./tmp:/app/tmp
       - ./images:/app/images
       - ./data:/app/data  # Mount the whole data directory instead
+      - /dev/dri:/dev/dri  # Add this line to access the Intel GPU
+    deploy:
+      resources:
+        limits:
+          memory: 8G  # Add a resource limit to make the structure valid
     environment:      
       - BACKGROUND_MUSIC_PATH=/app/assets/music
       - BACKGROUND_MUSIC_ENABLED=false
@@ -20,11 +25,21 @@ services:
       - KOKORO_SERVICE_URL=http://kokoro_service:8880  # URL for the service
       - PEXELS_API_KEY=${PEXELS_API_KEY}
       - MAX_BG_VIDEOS=${MAX_BG_VIDEOS}
-      # CPU optimization settings
+      # CPU optimization 
       - OMP_NUM_THREADS=8
       - MKL_NUM_THREADS=8
       - NUMEXPR_NUM_THREADS=8
       - PYTORCH_ENABLE_CPU_FALLBACK=1
+      # FFmpeg optimization 
+      - FFREPORT=file=/app/tmp/ffmpeg_report.log:level=32
+      - AV_LOG_FORCE_COLOR=1
+      - FFMPEG_THREADS=8
+      # Intel GPU support Newer Intel GPUs (try for UHD)
+      - LIBVA_DRIVER_NAME=iHD
+      # Hardware acceleration flags for FFmpeg
+      - FFMPEG_HWACCEL=vaapi
+      - FFMPEG_VAAPI_DEVICE=/dev/dri/renderD128
+    runtime: "runc"
     
     restart: unless-stopped
     healthcheck:
