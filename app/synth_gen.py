@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from app.utils.strings import log_attempt_number
 from app.utils.strings import make_cuid
+from app.utils.strings import split_audio_at_sentences
 from elevenlabs import Voice, VoiceSettings, save
 from elevenlabs.client import ElevenLabs
 import httpx
@@ -32,25 +33,19 @@ class VoiceProvider(str, Enum):
     AIRFORCE = "airforce"
 
 class SynthConfig(BaseModel):
-    """Synthesis configuration."""
     voice: str = "af_alloy"  # Default to a Kokoro voice
     voice_provider: VoiceProvider = VoiceProvider.KOKORO  # Default to Kokoro
-
     static_mode: bool = False
     """ if we're generating static audio for test """
     sentence_pause: float = 0.0  # Pause duration between sentences
-
 
 class SynthGenerator:
     def __init__(self, cwd: str, config: SynthConfig):
         self.config = config
         self.cwd = cwd
         self.cache_key: str | None = None
-
         self.base = os.path.join(self.cwd, "audio_chunks")
-
         os.makedirs(self.base, exist_ok=True)
-
         self.client = ElevenLabs(
             api_key=os.getenv("ELEVENLABS_API_KEY"),
         )
@@ -66,29 +61,23 @@ class SynthGenerator:
             f"{self.config.voice_provider}_{ky}.mp3",
         )
         text_hash = text_to_sha256_hash(self.text)
-
         self.cache_key = f"{self.config.voice}_{text_hash}"
 
     async def generate_with_eleven(self, text: str) -> str:
         # Prioritize config.voice over environment variable
         voice_id = self.config.voice or os.environ.get("VOICE") or "21m00Tcm4TlvDq8ikWAM"
-        
         # Add logging for debugging
         logger.info(f"Using ElevenLabs voice_id: {voice_id}")
-        
-        voice = Voice(                        
-            voice_id=voice_id,  # Fix syntax error here
+        voice = Voice(
+            voice_id=voice_id,
             settings=VoiceSettings(
                 stability=0.71, similarity_boost=0.5, style=0.0, use_speaker_boost=True
             ),
         )
-
         audio = self.client.generate(
             text=text, voice=voice, model="eleven_multilingual_v2", stream=False
         )
-
         save(audio, self.speech_path)
-
         return self.speech_path
 
     # Update the is_valid_voice method
@@ -99,7 +88,6 @@ class SynthGenerator:
             if not voice:
                 logger.warning(f"Empty voice provided for {provider}. Using default voice.")
                 return False
-                
             if provider == VoiceProvider.KOKORO:
                 # Get the list of valid Kokoro voices
                 from app.kokoro_service import kokoro_client
@@ -133,12 +121,10 @@ class SynthGenerator:
     async def generate_with_kokoro(self, text: str) -> Optional[str]:
         """Generate speech using Kokoro Service."""
         logger.info(f"Generating speech with Kokoro Service, voice: {self.config.voice}")
-        
         audio_bytes = await kokoro_client.create_speech(
             text=text,
             voice=self.config.voice
         )
-        
         if audio_bytes:
             logger.info(f"Successfully generated speech with Kokoro, saving to {self.speech_path}")
             # Save the audio bytes to file
@@ -149,24 +135,19 @@ class SynthGenerator:
         else:
             logger.error("Failed to generate audio with Kokoro, using fallback")
             return self._create_fallback_audio(text)
-        
+
     def _create_fallback_audio(self, text: str) -> str:
         """Create a fallback audio file if TTS fails."""
         logger.warning("Creating fallback silent audio file")
         from pydub import AudioSegment
-        
         # Create a silent audio file with duration based on text length
         duration_ms = max(2000, len(text) * 30)  # About 30ms per character, min 2 seconds
-        
         # Generate silent audio
         silent_audio = AudioSegment.silent(duration=duration_ms)
-        
         # Ensure directory exists
         os.makedirs(os.path.dirname(self.speech_path), exist_ok=True)
-        
         # Save to file
         silent_audio.export(self.speech_path, format="mp3")
-        
         logger.info(f"Created fallback audio at: {self.speech_path}")
         return self.speech_path
 
@@ -175,9 +156,7 @@ class SynthGenerator:
             if not self.cache_key:
                 logger.warning("Skipping speech cache because it is not set")
                 return
-
             speech_path = os.path.join(speech_cache_path, f"{self.cache_key}.mp3")
-            
             # Add check if source file exists before copying
             if os.path.exists(self.speech_path):
                 shutil.copy2(self.speech_path, speech_path)
@@ -202,11 +181,9 @@ class SynthGenerator:
         if not text or text.strip() == "":
             logger.warning("Empty text provided for speech synthesis. Using placeholder.")
             text = "No text was provided."  # Use a placeholder text instead
-        
         # Add state tracking for failed providers
         if not hasattr(self, '_failed_providers'):
             self._failed_providers = set()
-        
         try:
             # Skip if this provider has already failed
             if self.config.voice_provider.lower() in self._failed_providers:
@@ -218,14 +195,12 @@ class SynthGenerator:
                     return await self._synth_with_provider(text)
                 finally:
                     self.config.voice_provider = old_provider
-                
             # Attempt with configured provider
             return await self._synth_with_provider(text)
         except Exception as e:
             logger.error(f"Primary voice provider failed: {e}")
             # Mark this provider as failed
             self._failed_providers.add(self.config.voice_provider.lower())
-            
             # Switch to fallback provider
             old_provider = self.config.voice_provider
             self.config.voice_provider = "tiktok"  # Use TikTok as fallback
@@ -240,27 +215,20 @@ class SynthGenerator:
         # Double-check that text is not empty
         if not text or text.strip() == "":
             text = "No text was provided."
-        
         if self.config.sentence_pause > 0:
             # Add pause markers between sentences
             text = re.sub(r'([.!?]) ', r'\1' + (' ' * int(self.config.sentence_pause * 10)) + ' ', text)
-        
         self.text = text
         self.set_speech_props()
-
         cached_speech = search_file(speech_cache_path, self.cache_key)
-
         if cached_speech:
             logger.info(f"Found speech in cache: {cached_speech}")
             shutil.copy2(cached_speech, self.speech_path)
             return cached_speech
-
         logger.info(f"Synthesizing text: {text}")
-
         # Use the enum directly for better type safety
         provider = self.config.voice_provider
         voice = self.config.voice
-        
         # Validate the voice before proceeding
         if not self.is_valid_voice(provider, voice):
             logger.warning(f"Voice '{voice}' is not valid for provider {provider}. Using default voice.")
@@ -277,7 +245,6 @@ class SynthGenerator:
                 self.config.voice = "default"
             # Update speech props with new voice
             self.set_speech_props()
-        
         if provider == VoiceProvider.KOKORO:
             generator = self.generate_with_kokoro
         elif provider == VoiceProvider.ELEVENLABS:
@@ -290,25 +257,19 @@ class SynthGenerator:
             generator = self.generate_with_airforce 
         else:
             raise ValueError(f"Voice provider '{provider}' is not recognized")
-
         speech_path = await generator(text)
-        
         # After generating the speech audio
         if self.config.sentence_pause > 0:
             # Split audio at sentence boundaries
             sentence_audios = split_audio_at_sentences(speech_path, text)
-            
             # Create silence segment
             silence_duration = int(self.config.sentence_pause * 1000)  # ms
             silence = AudioSegment.silent(duration=silence_duration)
-            
             # Join with silences between segments
             final_audio = sentence_audios[0]
             for segment in sentence_audios[1:]:
                 final_audio += silence + segment
-            
             # Save the new audio
             final_audio.export(self.speech_path, format="mp3")
-
         await self.cache_speech(text)
         return self.speech_path
