@@ -147,6 +147,15 @@ class ReelsMaker(BaseEngine):
         return tags
 
     async def start(self, st_state=None) -> StartResponse:
+        # At the beginning of the method
+        self.st_state = st_state  # Store the session state
+        
+        # Add this check before major processing steps
+        if self.st_state and self.st_state.get("cancel_requested", False):
+            logger.info("Cancellation requested, aborting video generation")
+            await self.cleanup_temp_files()
+            return None  # Return None to indicate cancellation
+
         try:
             await super().start()
             
@@ -412,6 +421,12 @@ class ReelsMaker(BaseEngine):
 
             if iteration_count >= max_iterations:
                 logger.warning(f"Hit maximum iterations ({max_iterations}) when building video")
+
+            # Throughout the method, add periodic checks:
+            if self.st_state and self.st_state.get("cancel_requested", False):
+                logger.info("Cancellation detected during processing")
+                await self.cleanup_temp_files()
+                return None
 
             if st_state and self.check_cancellation(st_state):
                 raise Exception("Processing cancelled by user")

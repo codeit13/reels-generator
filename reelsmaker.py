@@ -11,9 +11,95 @@ from streamlit.runtime.uploaded_file_manager import UploadedFile
 from app.reels_maker import ReelsMaker, ReelsMakerConfig
 from app.synth_gen import SynthConfig
 from app.video_gen import VideoGeneratorConfig
+from streamlit.components.v1 import html
 
 # Add this import if not already present
 import os.path
+
+# Update the create_timer function for a more robust implementation
+def create_timer():
+    """Create a JavaScript timer that updates every second without page refreshes"""
+    timer_html = """
+        <div id="timer_display" style="font-size: 1.2rem; font-weight: bold; margin: 10px 0; color: white; background-color: rgba(0,0,0,0.5); padding: 5px 10px; border-radius: 5px; display: inline-block;">⏱️ Elapsed time: 0m 0s</div>
+     
+    <script>
+        // Timer variables
+        var startTime = new Date().getTime();
+        var timerInterval;
+        
+        // Format time function
+        function formatTime(seconds) {
+            var minutes = Math.floor(seconds / 60);
+            var secs = seconds % 60;
+            return minutes + "m " + secs + "s";
+        }
+        
+        // Update the timer display
+        function updateTimer() {
+            var currentTime = new Date().getTime();
+            var elapsedSeconds = Math.floor((currentTime - startTime) / 1000);
+            document.getElementById("timer_display").innerHTML = "⏱️ Elapsed time: " + formatTime(elapsedSeconds);
+            
+            // Also check for success message on each update (backup method)
+            checkForSuccess();
+        }
+        
+        // Function to check for success message
+        function checkForSuccess() {
+            const successElements = document.querySelectorAll('.element-container');
+            for (let element of successElements) {
+                if (element.innerText && element.innerText.includes("Video generated successfully")) {
+                    console.log("Success message found, stopping timer");
+                    clearInterval(timerInterval);
+                    return;
+                }
+            }
+        }
+        
+        // Start the timer
+        timerInterval = setInterval(updateTimer, 1000);
+        
+        // Watch for completion message with enhanced targeting
+        const observer = new MutationObserver((mutations) => {
+            for (let mutation of mutations) {
+                if (mutation.type === 'childList' && mutation.addedNodes.length) {
+                    for (let node of mutation.addedNodes) {
+                        if (node.nodeType === Node.ELEMENT_NODE) {
+                            // Check the node itself
+                            if (node.innerText && node.innerText.includes("Video generated successfully")) {
+                                console.log("Timer stopped: video generation complete (direct match)");
+                                clearInterval(timerInterval);
+                                return;
+                            }
+                            
+                            // Also check any child elements with class 'stAlert'
+                            const alerts = node.querySelectorAll('.stAlert');
+                            for (let alert of alerts) {
+                                if (alert.innerText && alert.innerText.includes("Video generated successfully")) {
+                                    console.log("Timer stopped: video generation complete (alert match)");
+                                    clearInterval(timerInterval);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        // Start observing the entire document body with all possible options
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            characterData: true
+        });
+        
+        // Initial check in case the message is already there
+        checkForSuccess();
+    </script>
+    """
+    return html(timer_html, height=50)
 
 # Near the beginning of your main() function, add:
 st.session_state.setdefault("last_video_path", None)
@@ -161,10 +247,6 @@ async def main():
     os.makedirs(cwd, exist_ok=True)
     
     st.title("Video Reels Story Maker")
-    # st.write("Create Engaging Faceless Videos for Social Media in Seconds")
-    # st.write(
-    #     "Our tools make it easy to create captivating faceless videos that boost engagement and reach on social media in seconds."
-    # )
     st.divider()
 
     sentence_tab, prompt_tab = st.tabs(
@@ -474,15 +556,6 @@ async def main():
             with picker_col:
                 stroke_color = st.color_picker("##stroke_color", value="#000000", label_visibility="collapsed")
 
-
-
-        
-
-    # Second expander for Video Processing options
-    # with st.expander("Video Processing Options", expanded=False):
-    #     # Remove the duplicate aspect ratio and video quality controls
-    #     # but keep the mapping code
-        
         # Extract just the ratio value for the config
         aspect_ratio_map = {
             "Portrait (9:16) - Instagram/TikTok": "9:16",
@@ -499,13 +572,6 @@ async def main():
         }
         cpu_preset = preset_mapping[video_quality]
         
-        # # CPU thread settings only
-        # cpu_count = multiprocessing.cpu_count()
-        # # Use fewer threads to prevent memory issues with integrated GPU
-        # cpu_count = max(1, min(8, cpu_count // 2))  # Use half available cores (1-8)
-        # threads = st.number_input("Threads", value=cpu_count, step=1, min_value=1, max_value=16)
-
-
         # Update the config creation to include font_family and auto_download
         config = ReelsMakerConfig(
             job_id="".join(str(uuid4()).split("-")),
@@ -634,57 +700,65 @@ async def main():
             if cancel_placeholder.button("Cancel Generation", key="cancel_gen"):
                 st.session_state["cancel_requested"] = True
                 st.warning("Cancellation requested. Please wait for the current operation to complete...")
+                
+                # Add a direct job cancellation call
+                if "last_job_id" in st.session_state and st.session_state["last_job_id"] in queue:
+                    # Remove from queue to prevent further processing
+                    del queue[st.session_state["last_job_id"]]
+                    st.error("Generation cancelled!")
+                    # Reset generation state
+                    st.session_state["is_generating"] = False
+                    st.session_state["timer_running"] = False
+                    # Break out of the generation flow
+                    st.stop()  # This will stop execution immediately
+
+            # Add the JavaScript timer instead of the Python timer logic
+            create_timer()  # Call it directly without trying to write it to a placeholder
 
             with st.spinner("Generating reels, this will take ~5mins or less..."):
                 try:
-                    # Timer update logic
-                    if "timer_running" in st.session_state and st.session_state["timer_running"]:
-                        st.empty().markdown(f"<div id='timer-refresh'>{time.time()}</div>", unsafe_allow_html=True)
-                        current_time = time.time()
-                        elapsed = current_time - st.session_state.get("start_time", current_time)
-                        elapsed_placeholder.markdown(f"⏱️ **Elapsed time:** {format_elapsed_time(int(elapsed))}")
-                    
                     # Add to queue and process
                     queue_id = config.job_id
+                    st.session_state["last_job_id"] = queue_id  # Store for cancellation access
                     queue[queue_id] = config
                     
                     # Create and run reels maker
                     reels_maker = ReelsMaker(config)
                     output = await reels_maker.start(st_state=st.session_state)
                     
-                    # Reset generation state
-                    st.session_state["timer_running"] = False
-                    st.session_state["is_generating"] = False
-                    st.session_state["last_generated_id"] = queue_id
-                    
-                    # Show success and display video
-                    st.success("Video generated successfully!")
-                    
-                    if output is not None and hasattr(output, 'video_file_path'):
-                        video_path = output.video_file_path
-                        st.session_state["last_video_path"] = video_path  # Store for persistence
+                    # Only show output if not cancelled
+                    if output is not None and not st.session_state.get("cancel_requested", False):
+                        # Display video and success message
+                        st.success("Video generated successfully!")
+                        st.session_state["timer_running"] = False  # Stop the timer
+                        st.session_state["is_generating"] = False
                         
-                        # Display video
-                        st.video(video_path)
-                        
-                        # Create download button
-                        if os.path.exists(video_path):
-                            with open(video_path, "rb") as file:
-                                video_bytes = file.read()
-                                st.session_state["last_video_bytes"] = video_bytes
+                        if output is not None and hasattr(output, 'video_file_path'):
+                            video_path = output.video_file_path
+                            st.session_state["last_video_path"] = video_path  # Store for persistence
                             
-                            st.download_button(
-                                "Download Reels", 
-                                video_bytes, 
-                                file_name=f"reels_{queue_id}.mp4",
-                                mime="video/mp4",
-                                key=f"download_button_{queue_id}"
-                            )
+                            # Display video
+                            st.video(video_path)
+                            
+                            # Create download button
+                            if os.path.exists(video_path):
+                                with open(video_path, "rb") as file:
+                                    video_bytes = file.read()
+                                    st.session_state["last_video_bytes"] = video_bytes
+                                
+                                st.download_button(
+                                    "Download Reels", 
+                                    video_bytes, 
+                                    file_name=f"reels_{queue_id}.mp4",
+                                    mime="video/mp4",
+                                    key=f"download_button_{queue_id}"
+                                )
                 except Exception as e:
+                    st.error(f"Generation failed: {e}")
+                finally:
+                    # Cleanup regardless of success or cancellation
                     st.session_state["is_generating"] = False
                     st.session_state["timer_running"] = False
-                    st.error(f"Error: {str(e)}")
-                    logger.exception(f"Generation failed: {e}")
 
     if os.path.exists(cwd):
         try:
@@ -694,16 +768,7 @@ async def main():
         except Exception as cleanup_error:
             logger.warning(f"Failed to clean up temporary files: {cleanup_error}")
 
-# # Add this to display diagnostics in the UI
-# if st.sidebar.button("Run System Diagnostics"):
-#     with st.spinner("Running diagnostics..."):
-#         # Create temporary instance of ReelsMaker to run diagnostics
-#         temp_config = ReelsMakerConfig(job_id="diagnostics", video_type="test")
-#         diag_maker = ReelsMaker(temp_config)
-#         diagnostics = asyncio.run(diag_maker.run_diagnostics())
-        
-#         # Display results
-#         st.sidebar.json(diagnostics)
+
 
 
 if __name__ == "__main__":
