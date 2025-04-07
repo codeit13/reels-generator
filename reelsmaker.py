@@ -496,6 +496,22 @@ async def main():
         # st.write("Advanced Settings")
         adv_col1, adv_col2, adv_col3 = st.columns(3)
 
+           
+        with adv_col1:
+            # Existing subtitle position control
+            subtitles_position = st.selectbox("Subtitle position", ["center,center"])
+
+            
+            # # Add sentence pause control
+            # sentence_pause = st.slider(
+            #     "Pause between sentences (seconds)",
+            #     min_value=0.0,
+            #     max_value=2.0,
+            #     value=0.5,
+            #     step=0.1,
+            #     help="Add extra pause between sentences in narration"
+            # )
+            
         with adv_col2:
             # Auto-download toggle (boolean selectbox)
             auto_download = st.selectbox(
@@ -506,20 +522,6 @@ async def main():
                 help="Automatically download resources when generating"
             )
             
-        with adv_col1:
-            # Existing subtitle position control
-            subtitles_position = st.selectbox("Subtitle position", ["center,center"])
-            
-            # Add sentence pause control
-            sentence_pause = st.slider(
-                "Pause between sentences (seconds)",
-                min_value=0.0,
-                max_value=2.0,
-                value=0.5,
-                step=0.1,
-                help="Add extra pause between sentences in narration"
-            )
-
         with adv_col3:
             # Threads control - dynamic default based on CPU count
             cpu_count = multiprocessing.cpu_count()
@@ -533,9 +535,85 @@ async def main():
                 help="Number of CPU threads to use for processing"
             )
 
+        # Create the first row of controls for audio settings
+        audio_col1, audio_col2, audio_col3 = st.columns(3)
+        
+        with audio_col1:
+            sentence_pause = st.slider(
+                "Sentence pause (seconds)",
+                min_value=0.5,
+                max_value=2.0,
+                value=0.75,
+                step=0.05,
+                help="Add extra pause between sentences in narration"
+            )
+        
+        with audio_col3:
+            voice_style = st.selectbox(
+                "Voice Style",
+                options=["Neutral", "Cheerful", "Serious", "Excited", "Sad"],
+                index=0,
+                help="Control the emotional tone of the voice (when supported)"
+            )
+        
+        with audio_col2:
+            speech_rate = st.slider(
+                "Speech Rate",
+                min_value=0.7,
+                max_value=1.5,
+                value=1.0,
+                step=0.1,
+                help="Control how fast the narration speaks"
+            )
+
+      
+        # Extract just the ratio value for the config
+        aspect_ratio_map = {
+            "Portrait (9:16) - Instagram/TikTok": "9:16",
+            "Landscape (16:9) - YouTube/Facebook": "16:9",
+            "Square (1:1) - Instagram": "1:1"
+        }
+        aspect_ratio_value = aspect_ratio_map[aspect_ratio]
+
+        # Convert to CPU preset values
+        preset_mapping = {
+            "Fastest (Low Quality)": "ultrafast", 
+            "Balanced": "veryfast",
+            "High Quality": "medium"
+        }
+        cpu_preset = preset_mapping[video_quality]
+        
+
+        # Add this after your audio controls row (around line 435)
+        # Create a new row for video enhancement controls
+        video_enhance_col1, video_enhance_col2, video_enhance_col3 = st.columns(3)
+
+        with video_enhance_col1:
+            platform_preset = st.selectbox(
+                "Platform Optimization",
+                options=["TikTok", "Instagram", "YouTube Shorts", "Facebook", "LinkedIn"],
+                index=1,  # Default to Instagram
+                help="Optimize settings for specific platforms"
+            )
+
+        with video_enhance_col2:
+            transition_effect = st.selectbox(
+                "Transition Effect",
+                options=["None", "Fade", "Dissolve", "Wipe", "Slide"],
+                index=1,  # Default to Fade
+                help="Effect between video clips"
+            )
+
+        with video_enhance_col3:
+            video_mood = st.selectbox(
+                "Video Mood",
+                options=["Neutral", "Motivational", "Professional", "Dramatic", "Cheerful"],
+                index=1,  # Default to Motivational
+                help="Select mood for video content selection"
+            )
 
 
-        # Subtitles controls with centered color pickers but left-aligned labels
+  # Subtitles controls with centered color pickers but left-aligned labels
         color_col1, color_col2, color_col3 = st.columns(3)
 
         with color_col1:
@@ -556,23 +634,8 @@ async def main():
             with picker_col:
                 stroke_color = st.color_picker("##stroke_color", value="#000000", label_visibility="collapsed")
 
-        # Extract just the ratio value for the config
-        aspect_ratio_map = {
-            "Portrait (9:16) - Instagram/TikTok": "9:16",
-            "Landscape (16:9) - YouTube/Facebook": "16:9",
-            "Square (1:1) - Instagram": "1:1"
-        }
-        aspect_ratio_value = aspect_ratio_map[aspect_ratio]
 
-        # Convert to CPU preset values
-        preset_mapping = {
-            "Fastest (Low Quality)": "ultrafast", 
-            "Balanced": "veryfast",
-            "High Quality": "medium"
-        }
-        cpu_preset = preset_mapping[video_quality]
-        
-        # Update the config creation to include font_family and auto_download
+
         config = ReelsMakerConfig(
             job_id="".join(str(uuid4()).split("-")),
             video_type="narrator",
@@ -591,14 +654,19 @@ async def main():
                 font_name=font_name,
                 threads=int(threads),
                 cpu_preset=cpu_preset,
-                aspect_ratio=aspect_ratio_value
+                aspect_ratio=aspect_ratio_value,
+                transition_effect=transition_effect,  # Add new parameters
+                platform_preset=platform_preset,
+                video_mood=video_mood
             ),
             synth_config=SynthConfig(
                 voice=str(voice),
                 voice_provider=(voice_provider.lower() if voice_provider else None) or 
                               os.environ.get("VOICE_PROVIDER", "").lower() or 
                               "tiktok",
-                # sentence_pause=sentence_pause,  # Add this line
+                sentence_pause=sentence_pause,
+                speech_rate=speech_rate,        # Add new parameters
+                voice_style=voice_style
             ),
         )
 
@@ -671,14 +739,19 @@ async def main():
                     font_name=font_name,
                     threads=int(threads),
                     cpu_preset=cpu_preset,
-                    aspect_ratio=aspect_ratio_value
+                    aspect_ratio=aspect_ratio_value,
+                    transition_effect=transition_effect,  # Add new parameters
+                    platform_preset=platform_preset,
+                    video_mood=video_mood
                 ),
                 synth_config=SynthConfig(
                     voice=str(voice),
                     voice_provider=(voice_provider.lower() if voice_provider else None) or 
                                   os.environ.get("VOICE_PROVIDER", "").lower() or 
                                   "tiktok",
-                    # sentence_pause=sentence_pause,  # Add this line
+                    sentence_pause=sentence_pause,
+                    speech_rate=speech_rate,        # Add new parameters
+                    voice_style=voice_style
                 ),
             )
             

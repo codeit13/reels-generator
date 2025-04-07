@@ -19,6 +19,7 @@ __pycache__/
 *.wsl
 
 ps*
+expert*
 
 cache/
 archive/
