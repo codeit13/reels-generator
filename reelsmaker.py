@@ -16,6 +16,51 @@ from streamlit.components.v1 import html
 # Add this import if not already present
 import os.path
 
+def check_log_dirs():
+    """Check log directories and their permissions."""
+    import os
+    from pathlib import Path
+    
+    tmp_dir = os.path.join(os.getcwd(), "tmp")
+    tmp_logs_dir = os.path.join(tmp_dir, "logs")
+    
+    logger.debug(f"tmp directory: {tmp_dir}")
+    logger.debug(f"  exists: {os.path.exists(tmp_dir)}")
+    if os.path.exists(tmp_dir):
+        logger.debug(f"  writable: {os.access(tmp_dir, os.W_OK)}")
+    
+    logger.debug(f"tmp/logs directory: {tmp_logs_dir}")
+    logger.debug(f"  exists: {os.path.exists(tmp_logs_dir)}")
+    if os.path.exists(tmp_logs_dir):
+        logger.debug(f"  writable: {os.access(tmp_logs_dir, os.W_OK)}")
+        logger.debug(f"  contents: {os.listdir(tmp_logs_dir) if os.path.exists(tmp_logs_dir) else 'N/A'}")
+
+def check_logging_status():
+    """Check the status of logging in the application."""
+    import os
+    from pathlib import Path
+    
+    # Check the tmp/logs directory
+    logs_dir = Path(os.path.join(os.getcwd(), "tmp", "logs"))
+    
+    logger.debug(f"Checking logs directory: {logs_dir}")
+    
+    if logs_dir.exists():
+        log_files = list(logs_dir.glob("*.csv"))
+        
+        logger.debug(f"Found {len(log_files)} log files:")
+        for log_file in log_files:
+            size = log_file.stat().st_size
+            logger.debug(f"  - {log_file.name} ({size} bytes)")
+            
+            # If CSV file exists but has almost no content, read it
+            if size < 1000 and log_file.suffix.lower() == '.csv':
+                try:
+                    with open(log_file, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        logger.debug(f"    Content: {content[:200]}...")
+                except Exception as e:
+                    logger.error(f"    Error reading file: {e}")
 # Update the create_timer function for a more robust implementation
 def create_timer():
     """Create a JavaScript timer that updates every second without page refreshes"""
@@ -224,7 +269,25 @@ def format_elapsed_time(seconds):
     seconds = seconds % 60
     return f"{minutes}m {seconds}s"
 
+def add_log_diagnostics(reels_maker):
+    """Add diagnostic information about logging after video generation"""
+    try:
+        if hasattr(reels_maker, 'metrics_logger'):
+            logger.info(f"Metrics logger enabled: {reels_maker.metrics_logger.enabled}")
+            if hasattr(reels_maker.metrics_logger, 'log_file') and reels_maker.metrics_logger.log_file:
+                logger.info(f"Metrics log file: {reels_maker.metrics_logger.log_file}")
+                
+        if hasattr(reels_maker, 'match_logger'):
+            logger.info(f"Match logger enabled: {reels_maker.match_logger.enabled}")
+            if hasattr(reels_maker.match_logger, 'log_file') and reels_maker.match_logger.log_file:
+                logger.info(f"Match log file: {reels_maker.match_logger.log_file}")
+        
+        # Run the check_logging_status function we created earlier
+        check_logging_status()
+    except Exception as e:
+        logger.error(f"Error in log diagnostics: {e}")
 async def main():
+    check_log_dirs()
     # At the beginning of your main function, add this to display previously generated videos
     if ("last_video_path" in st.session_state and 
         st.session_state["last_video_path"] is not None and 
@@ -430,8 +493,6 @@ async def main():
                         index=0,
                         help="Professional quality ElevenLabs voices (requires API key)"
                     )
-
-
         
         # NEW ROW: Video configuration in 3 columns
         # st.write("Video Configuration")
@@ -489,29 +550,16 @@ async def main():
             fontsize = st.number_input("Font size", value=200, step=5, min_value=10)
 
         with col3:
-            stroke_width = st.number_input("Border", value=2, step=1, min_value=1)
-
+            stroke_width = st.number_input("Border", value=4, step=1, min_value=1)
 
         # Create a new 3-column row for advanced settings
         # st.write("Advanced Settings")
         adv_col1, adv_col2, adv_col3 = st.columns(3)
-
            
         with adv_col1:
             # Existing subtitle position control
             subtitles_position = st.selectbox("Subtitle position", ["center,center"])
-
-            
-            # # Add sentence pause control
-            # sentence_pause = st.slider(
-            #     "Pause between sentences (seconds)",
-            #     min_value=0.0,
-            #     max_value=2.0,
-            #     value=0.5,
-            #     step=0.1,
-            #     help="Add extra pause between sentences in narration"
-            # )
-            
+           
         with adv_col2:
             # Auto-download toggle (boolean selectbox)
             auto_download = st.selectbox(
@@ -535,37 +583,6 @@ async def main():
                 help="Number of CPU threads to use for processing"
             )
 
-        # Create the first row of controls for audio settings
-        audio_col1, audio_col2, audio_col3 = st.columns(3)
-        
-        with audio_col1:
-            sentence_pause = st.slider(
-                "Sentence pause (seconds)",
-                min_value=0.5,
-                max_value=2.0,
-                value=0.75,
-                step=0.05,
-                help="Add extra pause between sentences in narration"
-            )
-        
-        with audio_col3:
-            voice_style = st.selectbox(
-                "Voice Style",
-                options=["Neutral", "Cheerful", "Serious", "Excited", "Sad"],
-                index=0,
-                help="Control the emotional tone of the voice (when supported)"
-            )
-        
-        with audio_col2:
-            speech_rate = st.slider(
-                "Speech Rate",
-                min_value=0.7,
-                max_value=1.5,
-                value=1.0,
-                step=0.1,
-                help="Control how fast the narration speaks"
-            )
-
       
         # Extract just the ratio value for the config
         aspect_ratio_map = {
@@ -573,47 +590,8 @@ async def main():
             "Landscape (16:9) - YouTube/Facebook": "16:9",
             "Square (1:1) - Instagram": "1:1"
         }
-        aspect_ratio_value = aspect_ratio_map[aspect_ratio]
 
-        # Convert to CPU preset values
-        preset_mapping = {
-            "Fastest (Low Quality)": "ultrafast", 
-            "Balanced": "veryfast",
-            "High Quality": "medium"
-        }
-        cpu_preset = preset_mapping[video_quality]
-        
-
-        # Add this after your audio controls row (around line 435)
-        # Create a new row for video enhancement controls
-        video_enhance_col1, video_enhance_col2, video_enhance_col3 = st.columns(3)
-
-        with video_enhance_col1:
-            platform_preset = st.selectbox(
-                "Platform Optimization",
-                options=["TikTok", "Instagram", "YouTube Shorts", "Facebook", "LinkedIn"],
-                index=1,  # Default to Instagram
-                help="Optimize settings for specific platforms"
-            )
-
-        with video_enhance_col2:
-            transition_effect = st.selectbox(
-                "Transition Effect",
-                options=["None", "Fade", "Dissolve", "Wipe", "Slide"],
-                index=1,  # Default to Fade
-                help="Effect between video clips"
-            )
-
-        with video_enhance_col3:
-            video_mood = st.selectbox(
-                "Video Mood",
-                options=["Neutral", "Motivational", "Professional", "Dramatic", "Cheerful"],
-                index=1,  # Default to Motivational
-                help="Select mood for video content selection"
-            )
-
-
-  # Subtitles controls with centered color pickers but left-aligned labels
+        # Subtitles controls with centered color pickers but left-aligned labels
         color_col1, color_col2, color_col3 = st.columns(3)
 
         with color_col1:
@@ -634,7 +612,15 @@ async def main():
             with picker_col:
                 stroke_color = st.color_picker("##stroke_color", value="#000000", label_visibility="collapsed")
 
+        aspect_ratio_value = aspect_ratio_map[aspect_ratio]
 
+        # Convert to CPU preset values
+        preset_mapping = {
+            "Fastest (Low Quality)": "ultrafast", 
+            "Balanced": "veryfast",
+            "High Quality": "medium"
+        }
+        cpu_preset = preset_mapping[video_quality]
 
         config = ReelsMakerConfig(
             job_id="".join(str(uuid4()).split("-")),
@@ -654,19 +640,18 @@ async def main():
                 font_name=font_name,
                 threads=int(threads),
                 cpu_preset=cpu_preset,
-                aspect_ratio=aspect_ratio_value,
-                transition_effect=transition_effect,  # Add new parameters
-                platform_preset=platform_preset,
-                video_mood=video_mood
+                aspect_ratio=aspect_ratio_value
+                # transition_effect=transition_effect,  # Add new parameters
+                # platform_preset=platform_preset,
+                # video_mood=video_mood
             ),
             synth_config=SynthConfig(
                 voice=str(voice),
                 voice_provider=(voice_provider.lower() if voice_provider else None) or 
                               os.environ.get("VOICE_PROVIDER", "").lower() or 
-                              "tiktok",
-                sentence_pause=sentence_pause,
-                speech_rate=speech_rate,        # Add new parameters
-                voice_style=voice_style
+                              "tiktok" #,
+                # speech_rate=speech_rate,        # Add new parameters
+                # voice_style=voice_style
             ),
         )
 
@@ -694,6 +679,92 @@ async def main():
                 await download_to_path(dest=os.path.join(config.cwd, p.name), buff=p)
                 for p in uploaded_videos
             ]
+
+
+
+    with st.expander("Advanced Options", expanded=False):
+        st.info("These settings will be available in future updates")
+
+                # Create the first row of controls for audio settings
+        audio_col1, audio_col2, audio_col3 = st.columns(3)
+        
+        
+        with audio_col3:
+            voice_style = st.selectbox(
+                "Voice Style",
+                options=["Neutral", "Cheerful", "Serious", "Excited", "Sad"],
+                index=0,
+                help="Control the emotional tone of the voice (when supported)",
+                disabled=True
+            )
+        
+        with audio_col2:
+            is_rate_supported = voice_provider.lower() in ["kokoro", "elevenlabs"]
+            speech_rate = st.slider(
+                "Speech Rate",
+                min_value=0.7,
+                max_value=1.5,
+                value=1.0,
+                step=0.05,
+                help="Control how fast the narration speaks (only works with Kokoro and ElevenLabs)" if is_rate_supported else "Speech rate control not supported by TikTok",
+                # disabled=not is_rate_supported
+                disabled=True
+            )
+        
+                # Add this after your audio controls row (around line 435)
+        # Create a new row for video enhancement controls
+        video_enhance_col1, video_enhance_col2, video_enhance_col3 = st.columns(3)
+
+        with video_enhance_col1:
+            platform_preset = st.selectbox(
+                "Platform Optimization",
+                options=["TikTok", "Instagram", "YouTube Shorts", "Facebook", "LinkedIn"],
+                index=1,  # Default to Instagram
+                help="Optimize settings for specific platforms",
+                disabled=True
+            )
+
+        with video_enhance_col2:
+            transition_effect = st.selectbox(
+                "Transition Effect",
+                options=["None", "Fade", "Dissolve", "Wipe", "Slide"],
+                index=1,  # Default to Fade
+                help="Effect between video clips",
+                disabled=True
+            )
+
+        with video_enhance_col3:
+            video_mood = st.selectbox(
+                "Video Mood",
+                options=["Neutral", "Motivational", "Professional", "Dramatic", "Cheerful"],
+                index=1,  # Default to Motivational
+                help="Select mood for video content selection",
+                disabled=True
+            )
+
+        adv_col1, adv_col2 = st.columns(2)
+        
+        with adv_col1:
+            st.selectbox(
+                "AI Content Enhancement",
+                options=["None", "Grammar Correction", "Rephrase", "Expand Content"],
+                index=0,
+                help="Enhance your content using AI",
+                disabled=True
+            )
+            
+        with adv_col2:
+            st.selectbox(
+                "Output Format",
+                options=["MP4", "WebM", "GIF"],
+                index=0,
+                help="Select the output format for your video",
+                disabled=True
+            )
+            
+        with st.container():
+            st.write("Additional options will be available in future updates")
+            # You can add more disabled controls here
 
     print(f"starting reels maker: {config.model_dump_json()}")
     # st.write(
@@ -739,19 +810,18 @@ async def main():
                     font_name=font_name,
                     threads=int(threads),
                     cpu_preset=cpu_preset,
-                    aspect_ratio=aspect_ratio_value,
-                    transition_effect=transition_effect,  # Add new parameters
-                    platform_preset=platform_preset,
-                    video_mood=video_mood
+                    aspect_ratio=aspect_ratio_value
+                    # transition_effect=transition_effect,  # Add new parameters
+                    # platform_preset=platform_preset,
+                    # video_mood=video_mood
                 ),
                 synth_config=SynthConfig(
                     voice=str(voice),
                     voice_provider=(voice_provider.lower() if voice_provider else None) or 
                                   os.environ.get("VOICE_PROVIDER", "").lower() or 
-                                  "tiktok",
-                    sentence_pause=sentence_pause,
-                    speech_rate=speech_rate,        # Add new parameters
-                    voice_style=voice_style
+                                  "tiktok" #,
+                    # speech_rate=speech_rate,        # Add new parameters
+                    # voice_style=voice_style
                 ),
             )
             
@@ -799,6 +869,7 @@ async def main():
                     reels_maker = ReelsMaker(config)
                     output = await reels_maker.start(st_state=st.session_state)
                     
+                    add_log_diagnostics(reels_maker)
                     # Only show output if not cancelled
                     if output is not None and not st.session_state.get("cancel_requested", False):
                         # Display video and success message
@@ -832,6 +903,12 @@ async def main():
                     # Cleanup regardless of success or cancellation
                     st.session_state["is_generating"] = False
                     st.session_state["timer_running"] = False
+                    # Close loggers to ensure files are properly written
+                    if 'reels_maker' in locals():
+                        if hasattr(reels_maker, 'metrics_logger'):
+                            reels_maker.metrics_logger.close()
+                        if hasattr(reels_maker, 'match_logger'):
+                            reels_maker.match_logger.close()
 
     if os.path.exists(cwd):
         try:

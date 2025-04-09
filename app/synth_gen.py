@@ -33,11 +33,11 @@ class VoiceProvider(str, Enum):
     AIRFORCE = "airforce"
 
 class SynthConfig(BaseModel):
-    voice: str = "af_alloy"  # Default to a Kokoro voice
+    voice: str = "af_heart"  # Default to a Kokoro voice
     voice_provider: VoiceProvider = VoiceProvider.KOKORO  # Default to Kokoro
     static_mode: bool = False
+
     """ if we're generating static audio for test """
-    sentence_pause: float = 0.0  # Pause duration between sentences
 
 class SynthGenerator:
     def __init__(self, cwd: str, config: SynthConfig):
@@ -215,9 +215,7 @@ class SynthGenerator:
         # Double-check that text is not empty
         if not text or text.strip() == "":
             text = "No text was provided."
-        if self.config.sentence_pause > 0:
-            # Add pause markers between sentences
-            text = re.sub(r'([.!?]) ', r'\1' + (' ' * int(self.config.sentence_pause * 10)) + ' ', text)
+        
         self.text = text
         self.set_speech_props()
         cached_speech = search_file(speech_cache_path, self.cache_key)
@@ -258,18 +256,6 @@ class SynthGenerator:
         else:
             raise ValueError(f"Voice provider '{provider}' is not recognized")
         speech_path = await generator(text)
-        # After generating the speech audio
-        if self.config.sentence_pause > 0:
-            # Split audio at sentence boundaries
-            sentence_audios = split_audio_at_sentences(speech_path, text)
-            # Create silence segment
-            silence_duration = int(self.config.sentence_pause * 1000)  # ms
-            silence = AudioSegment.silent(duration=silence_duration)
-            # Join with silences between segments
-            final_audio = sentence_audios[0]
-            for segment in sentence_audios[1:]:
-                final_audio += silence + segment
-            # Save the new audio
-            final_audio.export(self.speech_path, format="mp3")
+
         await self.cache_speech(text)
         return self.speech_path

@@ -89,6 +89,8 @@ class BaseGeneratorConfig(BaseModel):
     video_paths: list[str] = []
 
 
+class ReelsMakerConfig(BaseGeneratorConfig):
+    enable_video_logging: bool = True  # Toggle to enable/disable video match logging
 class StartResponse(BaseModel):
     video_file_path: str
 

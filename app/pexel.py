@@ -2,16 +2,20 @@ import os
 import json
 from loguru import logger
 import requests
+from app.utils.metrics_logger import MetricsLogger
 
 # Add this at the module level to cache keywords
 _negative_keywords_cache = None
+
+# Initialize the logger at the module level
+metrics_logger = MetricsLogger()
 
 def get_negative_keywords():
     """Load negative keywords from JSON file with caching."""
     global _negative_keywords_cache
     
     # Return cached keywords if available
-    if _negative_keywords_cache is not None:
+    if (_negative_keywords_cache is not None):
         return _negative_keywords_cache
     
     try:
@@ -40,7 +44,7 @@ def get_negative_keywords():
     ]
     return _negative_keywords_cache
 
-def filter_negative_content(items):
+def filter_negative_content(items, query=None, metrics_logger=None):
     """Filter out content that contains negative keywords in description, tags, or URL."""
     keywords = get_negative_keywords()
     filtered_results = []
@@ -96,6 +100,10 @@ def filter_negative_content(items):
             logger.info(f"  {i}. ID: {details['id']} - URL: {details['url']}")
             logger.info(f"     Matched keywords: {', '.join(details['matching_keywords'])}")
     
+    # If you want to use metrics_logger, add code like this:
+    if metrics_logger:
+        metrics_logger.log_video_rejection(rejected_count, query)
+        
     return filtered_results
 
 async def search_for_stock_videos(
@@ -138,10 +146,16 @@ async def search_for_stock_videos(
     # Additional filtering to ensure correct aspect ratio
     video_urls = []
     
+    videos_data = response.get("videos", [])
     try:
-        videos = response.get("videos", [])
-        filtered_videos = filter_negative_content(videos)
-        
+        # Simple call that definitely works:
+        filtered_videos = filter_negative_content(videos_data)
+    except Exception as e:
+        logger.error(f"Error in content filtering: {e}")
+        # Fall back to using all videos if filtering fails
+        filtered_videos = videos_data
+
+    try:
         for video in filtered_videos:
             if video["duration"] < min_dur:
                 continue
