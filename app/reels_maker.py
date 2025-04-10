@@ -25,7 +25,7 @@ from app.base import (
 from app.utils.strings import split_by_dot_or_newline
 from app.utils.path_util import download_resource
 from app.utils.metrics_logger import MetricsLogger
-from app.utils.metrics_logger import VideoMatchLogger
+from app.utils.video_match_logger import VideoMatchLogger
 
 
 class ReelsMakerConfig(BaseGeneratorConfig):
