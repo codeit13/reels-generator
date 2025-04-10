@@ -376,10 +376,10 @@ class KokoroServiceClient:
                     self.voices = voice_data.get("voices", [])
             except Exception as e:
                 logger.error(f"Failed to load Kokoro voices from file: {e}")
-                self.voices = ["af_alloy"]  # Default fallback
+                self.voices = ["af_heart"]  # Default fallback
         else:
             logger.warning(f"Kokoro voices file not found at {kokoro_voices_path}")
-            self.voices = ["af_alloy"]  # Default fallback
+            self.voices = ["af_heart"]  # Default fallback
     
     def get_voices(self) -> List[Dict[str, str]]:
         """Return the list of available voices in a formatted way.
@@ -391,7 +391,7 @@ class KokoroServiceClient:
         
         # Format the voice information for the UI
         for voice_id in self.voices:
-            # Parse voice info from ID (e.g., af_alloy -> English Female Alloy)
+            # Parse voice info from ID (e.g., af_heart -> English Female Alloy)
             parts = voice_id.split('_')
             if len(parts) >= 2:
                 lang_gender = parts[0]
@@ -434,7 +434,7 @@ class KokoroServiceClient:
     async def create_speech(
         self,
         text: str,
-        voice: str = "af_alloy",
+        voice: str = "af_heart",
         response_format: str = "mp3",
         speed: float = 1.0
     ) -> Optional[bytes]:
@@ -521,7 +521,7 @@ class VoiceProvider(str, Enum):
 
 class SynthConfig(BaseModel):
     """Synthesis configuration."""
-    voice: str = "af_alloy"  # Default to a Kokoro voice
+    voice: str = "af_heart"  # Default to a Kokoro voice
     voice_provider: VoiceProvider = VoiceProvider.KOKORO  # Default to Kokoro
     
     # Other existing fields...
@@ -684,7 +684,7 @@ async def test_kokoro():
     
     # Test speech synthesis
     test_text = "Hello! This is a test of the Kokoro Service integration with ReelsMaker."
-    test_voice = "af_alloy"  # Use a common voice
+    test_voice = "af_heart"  # Use a common voice
     
     logger.info(f"Testing speech synthesis with voice: {test_voice}")
     start_time = time.time()

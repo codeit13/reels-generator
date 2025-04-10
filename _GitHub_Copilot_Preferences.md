@@ -1,9 +1,9 @@
 # My Copilot Preferences
 
 ## Code Recommendations
-- Always start code blocks with the filepath comment
+- Always start code blocks with the filepath comment and Show file navigation instructions when multiple files need changes
 - Use clear headings indicating which file to modify
-- Show file navigation instructions when multiple files need changes
+- DO NOT CHANGE any code that is not in the scope of the task.
 
 ## Format Preferences
 - Use PEP 8 style for Python

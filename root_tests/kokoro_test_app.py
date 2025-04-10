@@ -46,7 +46,7 @@ def load_voices(provider=voice_provider):
     
     # Provider-specific fallbacks
     if provider == "kokoro":
-        return ["af_alloy", "af_nova", "af_shimmer", "am_onyx", "am_echo"]
+        return ["af_heart", "af_nova", "af_shimmer", "am_onyx", "am_echo"]
     elif provider == "elevenlabs":
         return ["Rachel", "Domi", "Bella", "Antoni", "Arnold"]
     elif provider == "tiktok":

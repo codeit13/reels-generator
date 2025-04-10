@@ -501,7 +501,7 @@ async def main():
         with vid_col1:
             # Convert slider to selectbox with increments of 5
             max_bg_videos = int(os.getenv("MAX_BG_VIDEOS", 20))  # Default to 20 if not set
-            video_count_options = list(range(5, max_bg_videos + 1, 5))  # Create options: 5, 10, 15, 20...
+            video_count_options = list(range(1, max_bg_videos + 1, 5))  # Create options: 5, 10, 15, 20...
             max_videos = st.selectbox(
                 "Number of videos to download",
                 options=video_count_options,
@@ -523,6 +523,20 @@ async def main():
             )
 
         with vid_col3:
+            # Add speech rate control (only for Kokoro provider)
+            is_rate_supported = voice_provider.lower() in ["kokoro", "elevenlabs"]
+            speech_rate = 0.8
+            if voice_provider.lower() == "kokoro":  # Use .lower() here to match case-insensitive
+                speech_rate = st.number_input(
+                    "Speech rate:",
+                    min_value=0.26,
+                    max_value=4.0,
+                    value=0.8,
+                    step=0.02,
+                    help="Controls the speed of speech (0.25 = slower, 4.0 = faster)"
+                )
+
+
             # Convert select_slider to regular selectbox with same options
             video_quality = st.selectbox(
                 "Video Quality",
@@ -649,8 +663,9 @@ async def main():
                 voice=str(voice),
                 voice_provider=(voice_provider.lower() if voice_provider else None) or 
                               os.environ.get("VOICE_PROVIDER", "").lower() or 
-                              "tiktok" #,
-                # speech_rate=speech_rate,        # Add new parameters
+                              "tiktok",
+                speech_rate=speech_rate,
+                static_mode=False  # false controls natural vs true monotone speech     # Add new parameters
                 # voice_style=voice_style
             ),
         )
@@ -688,7 +703,9 @@ async def main():
                 # Create the first row of controls for audio settings
         audio_col1, audio_col2, audio_col3 = st.columns(3)
         
-        
+        with audio_col2:
+            pass
+               
         with audio_col3:
             voice_style = st.selectbox(
                 "Voice Style",
@@ -698,19 +715,7 @@ async def main():
                 disabled=True
             )
         
-        with audio_col2:
-            is_rate_supported = voice_provider.lower() in ["kokoro", "elevenlabs"]
-            speech_rate = st.slider(
-                "Speech Rate",
-                min_value=0.7,
-                max_value=1.5,
-                value=1.0,
-                step=0.05,
-                help="Control how fast the narration speaks (only works with Kokoro and ElevenLabs)" if is_rate_supported else "Speech rate control not supported by TikTok",
-                # disabled=not is_rate_supported
-                disabled=True
-            )
-        
+
                 # Add this after your audio controls row (around line 435)
         # Create a new row for video enhancement controls
         video_enhance_col1, video_enhance_col2, video_enhance_col3 = st.columns(3)
@@ -819,8 +824,9 @@ async def main():
                     voice=str(voice),
                     voice_provider=(voice_provider.lower() if voice_provider else None) or 
                                   os.environ.get("VOICE_PROVIDER", "").lower() or 
-                                  "tiktok" #,
-                    # speech_rate=speech_rate,        # Add new parameters
+                                  "tiktok",
+                    speech_rate=speech_rate,
+                    static_mode=False  # Controls natural vs monotone speech,        # Add new parameters
                     # voice_style=voice_style
                 ),
             )

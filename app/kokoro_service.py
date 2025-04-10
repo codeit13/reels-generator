@@ -26,10 +26,10 @@ class KokoroServiceClient:
                     logger.info(f"Loaded {len(self.voices)} Kokoro voices from data folder")
             except Exception as e:
                 logger.error(f"Failed to load Kokoro voices from file: {e}")
-                self.voices = ["af_alloy"]  # Default fallback
+                self.voices = ["af_heart"]  # Default fallback
         else:
             logger.warning(f"Kokoro voices file not found at {kokoro_voices_path}")
-            self.voices = ["af_alloy"]  # Default fallback
+            self.voices = ["af_heart"]  # Default fallback
     
     def get_voices(self) -> List[Dict[str, str]]:
         """Return the list of available voices in a formatted way.
@@ -41,7 +41,7 @@ class KokoroServiceClient:
         
         # Format the voice information for the UI
         for voice_id in self.voices:
-            # Parse voice info from ID (e.g., af_alloy -> English Female Alloy)
+            # Parse voice info from ID (e.g., af_heart -> English Female Alloy)
             parts = voice_id.split('_')
             if len(parts) >= 2:
                 lang_gender = parts[0]
@@ -84,7 +84,7 @@ class KokoroServiceClient:
     async def create_speech(
         self,
         text: str,
-        voice: str = "af_alloy",
+        voice: str = "af_heart",
         response_format: str = "mp3",
         speed: float = 1.0
     ) -> Optional[bytes]:

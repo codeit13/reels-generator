@@ -5,7 +5,7 @@ from pathlib import Path
 from loguru import logger
 
 class VideoMatchLogger:
-    """Simple CSV logger for tracking sentence-to-video matches."""
+    """CSV logger for tracking sentence-to-video matches in a single consolidated file."""
     
     def __init__(self, cwd: str = None, enabled: bool = True):
         self.enabled = enabled
@@ -28,21 +28,26 @@ class VideoMatchLogger:
             
             logger.debug(f"Using VideoMatchLogger directory: {log_dir.absolute()}")
             
-            # Create timestamped CSV file
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.log_file = log_dir / f"video_matches_{timestamp}.csv"
+            # Use a fixed filename instead of timestamped one
+            self.log_file = log_dir / "video_matches.csv"
             
-            # Create CSV file and write header
-            self.csv_file = open(self.log_file, 'w', newline='', encoding='utf-8')
+            # Check if file exists to determine if we need to write headers
+            file_exists = os.path.exists(self.log_file)
+            
+            # Open in append mode to add to existing file
+            self.csv_file = open(self.log_file, 'a', newline='', encoding='utf-8')
             self.writer = csv.writer(self.csv_file)
-            self.writer.writerow([
-                'timestamp', 
-                'sentence', 
-                'search_query',
-                'video_url',
-                'voice_provider',
-                'voice_name'
-            ])
+            
+            # Only write header if file is new
+            if not file_exists:
+                self.writer.writerow([
+                    'timestamp', 
+                    'sentence', 
+                    'search_query',
+                    'video_url',
+                    'voice_provider',
+                    'voice_name'
+                ])
             
             logger.info(f"Video match logging enabled: {self.log_file}")
         except Exception as e:

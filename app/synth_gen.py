@@ -35,6 +35,7 @@ class VoiceProvider(str, Enum):
 class SynthConfig(BaseModel):
     voice: str = "af_heart"  # Default to a Kokoro voice
     voice_provider: VoiceProvider = VoiceProvider.KOKORO  # Default to Kokoro
+    speech_rate: float = 0.8  # Default speech rate
     static_mode: bool = False
 
     """ if we're generating static audio for test """
@@ -92,7 +93,7 @@ class SynthGenerator:
                 # Get the list of valid Kokoro voices
                 from app.kokoro_service import kokoro_client
                 voice_options = kokoro_client.get_voices()
-                return any(v["id"] == voice for v in voice_options) or voice == "af_alloy"
+                return any(v["id"] == voice for v in voice_options) or voice == "af_heart"
             elif provider == VoiceProvider.ELEVENLABS:
                 # Basic validation for Elevenlabs voices
                 return len(voice) > 0
@@ -118,12 +119,20 @@ class SynthGenerator:
             logger.error(f"TikTok voice generation error: {e}")
             raise
 
-    async def generate_with_kokoro(self, text: str) -> Optional[str]:
+    # async def generate_with_kokoro(self, text: str) -> Optional[str]:
+    #     """Generate speech using Kokoro Service."""
+    #     logger.info(f"Generating speech with Kokoro Service, voice: {self.config.voice}")
+    #     audio_bytes = await kokoro_client.create_speech(
+    #         text=text,
+    #         voice=self.config.voice
+    #     )
+    async def generate_with_kokoro(self, text: str, speech_rate: float = 0.8) -> Optional[str]:
         """Generate speech using Kokoro Service."""
-        logger.info(f"Generating speech with Kokoro Service, voice: {self.config.voice}")
+        logger.info(f"Generating speech with Kokoro Service, voice: {self.config.voice}, rate: {speech_rate}")
         audio_bytes = await kokoro_client.create_speech(
             text=text,
-            voice=self.config.voice
+            voice=self.config.voice,
+            speed=speech_rate
         )
         if audio_bytes:
             logger.info(f"Successfully generated speech with Kokoro, saving to {self.speech_path}")
@@ -212,6 +221,7 @@ class SynthGenerator:
                 self.config.voice_provider = old_provider
 
     async def _synth_with_provider(self, text: str) -> str:
+        
         # Double-check that text is not empty
         if not text or text.strip() == "":
             text = "No text was provided."
@@ -232,7 +242,7 @@ class SynthGenerator:
             logger.warning(f"Voice '{voice}' is not valid for provider {provider}. Using default voice.")
             # Use a default voice for the selected provider
             if provider == VoiceProvider.KOKORO:
-                self.config.voice = "af_alloy"
+                self.config.voice = "af_heart"
             elif provider == VoiceProvider.ELEVENLABS:
                 self.config.voice = "Rachel"
             elif provider == VoiceProvider.TIKTOK:
@@ -243,19 +253,25 @@ class SynthGenerator:
                 self.config.voice = "default"
             # Update speech props with new voice
             self.set_speech_props()
+            
         if provider == VoiceProvider.KOKORO:
             generator = self.generate_with_kokoro
+            speech_path = await generator(text, self.config.speech_rate)
         elif provider == VoiceProvider.ELEVENLABS:
-            generator = self.generate_with_eleven  
+            generator = self.generate_with_eleven
+            speech_path = await generator(text)
         elif provider == VoiceProvider.TIKTOK:
-            generator = self.generate_with_tiktok                        
+            generator = self.generate_with_tiktok
+            speech_path = await generator(text)
         elif provider == VoiceProvider.OPENAI:
             generator = self.generate_with_openai
+            speech_path = await generator(text)
         elif provider == VoiceProvider.AIRFORCE:
-            generator = self.generate_with_airforce 
+            generator = self.generate_with_airforce
+            speech_path = await generator(text)
         else:
             raise ValueError(f"Voice provider '{provider}' is not recognized")
-        speech_path = await generator(text)
+            speech_path = await generator(text)
 
         await self.cache_speech(text)
         return self.speech_path

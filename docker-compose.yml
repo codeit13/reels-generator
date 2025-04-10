@@ -8,6 +8,7 @@ services:
     ports:
       - "7501:7501"
     volumes:
+      - ./:/app # for Dev: Mount the current directory to /app in the container
       - ./tmp:/app/tmp
       - ./images:/app/images
       - ./data:/app/data  # Mount the whole data directory instead

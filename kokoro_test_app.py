@@ -46,7 +46,7 @@ def load_voices(provider=voice_provider):
     
     # Provider-specific fallbacks
     if provider == "kokoro":
-        return ["af_alloy", "af_nova", "af_shimmer", "am_onyx", "am_echo"]
+        return ["af_heart", "af_nova", "af_shimmer", "am_onyx", "am_echo"]
     elif provider == "elevenlabs":
         return ["Rachel", "Domi", "Bella", "Antoni", "Arnold"]
     elif provider == "tiktok":
@@ -58,10 +58,23 @@ def load_voices(provider=voice_provider):
 available_voices = load_voices()
 text_input = st.text_area("Enter text to synthesize:", value="Hello, this is a test of the text to speech service.")
 voice_input = st.selectbox(f"Select {voice_provider} voice:", available_voices)
+
+# Add speech rate control (only for Kokoro provider)
+speech_rate = 1.0
+if voice_provider == "kokoro":
+    speech_rate = st.number_input(
+        "Speech rate:",
+        min_value=0.26,
+        max_value=4.0,
+        value=0.8,
+        step=0.02,
+        help="Controls the speed of speech (0.25 = slower, 4.0 = faster)"
+    )
+
 test_button = st.button("Generate Speech")
 
 # Function to generate speech
-async def generate_speech(text, voice):
+async def generate_speech(text, voice, speech_rate=1.0):
     # Get service URL based on provider
     service_url = os.environ.get(f"{voice_provider.upper()}_SERVICE_URL")
     
@@ -81,7 +94,11 @@ async def generate_speech(text, voice):
     
     # Create provider-specific payload
     if voice_provider == "kokoro":
-        payload = {"input": text, "voice": voice}
+        payload = {
+            "input": text, 
+            "voice": voice,
+            "speed": speech_rate  # Add speech rate parameter
+        }
         endpoint = "/v1/audio/speech"
     elif voice_provider == "elevenlabs":
         payload = {"text": text, "voice_id": voice}
@@ -170,7 +187,7 @@ async def generate_speech(text, voice):
 if test_button:
     with st.spinner("Generating speech..."):
         # Run the async function
-        audio_path, error = asyncio.run(generate_speech(text_input, voice_input))
+        audio_path, error = asyncio.run(generate_speech(text_input, voice_input, speech_rate))
         
         if error:
             st.error(f"Failed to generate speech: {error}")
