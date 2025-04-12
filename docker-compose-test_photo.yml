@@ -1,0 +1,66 @@
+# This is a Docker Compose file for testing the Kokoro service with a test app.
+# docker-compose -f docker-compose-test.yml down && docker-compose -f docker-compose-test.yml up --build
+
+services:
+  # Kokoro service using the specific image
+  kokoro_service:
+    image: ghcr.io/remsky/kokoro-fastapi-gpu:v0.2.2
+    container_name: kokoro_service_test
+    networks:
+      - kokoro_test_network
+    ports:
+      - "4880:8880"
+    environment:
+      - PORT=8880
+    restart: unless-stopped
+    # Add GPU settings if needed
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # Test app using your latest reelsmaker-app image
+  test_app:
+    image: reelsmaker-app:latest
+    container_name: photoreelsmaker_test_app
+    networks:
+      - kokoro_test_network
+    volumes:
+      - ./:/app
+      - ./data/kokoro_voices.json:/app/kokoro_voices.json
+      - ./data/elevenlabs_voices.json:/app/elevenlabs_voices.json
+      - ./data/tiktok_voices.json:/app/tiktok_voices.json
+    environment:
+      # Voice provider settings
+      - VOICE_PROVIDER=kokoro
+      - KOKORO_SERVICE_URL=http://kokoro_service_test:8880
+      - ELEVENLABS_SERVICE_URL=https://api.elevenlabs.io/v1
+      - TIKTOK_SERVICE_URL=https://tiktok-tts.weilnet.workers.dev/api/generation
+      
+      # Pexels API settings
+      - PEXELS_API_KEY=${PEXELS_API_KEY}
+      - PEXELS_PHOTO_API_URL=https://api.pexels.com/v1/search?query=
+      - PEXELS_PHOTO_API_URL_CURATED=https://api.pexels.com/v1/curated?per_page=80&page=1
+      - PEXELS_VIDEO_API_URL=https://api.pexels.com/videos/search?query=
+      - PEXELS_VIDEO_API_URL_CURATED=https://api.pexels.com/videos/curated?per_page=80&page=1
+      
+      # Output directory settings
+      - PHOTO_OUTPUT_DIR=/app/outputs/photos
+      - MAX_BG_VIDEOS=199
+      
+      # OpenAI for script generation (if needed)
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL_NAME=gpt-4-turbo
+    ports:
+      - "7507:7507"
+    command: streamlit run /app/photoreelsmaker.py --server.port=7507 --server.address=0.0.0.0
+    depends_on:
+      - kokoro_service
+
+# Define the network
+networks:
+  kokoro_test_network:
+    driver: bridge

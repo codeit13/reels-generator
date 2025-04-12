@@ -1,0 +1,72 @@
+services:
+  photo_test:
+    image: reelsmaker-app:latest
+    container_name: photo_test_container
+    ports:
+      - "7502:7501"  # Add port mapping for UI access
+    networks:
+      - photo_test_network
+    # Keep container running even if process fails
+    tty: true
+    stdin_open: true
+    volumes:
+      - ./:/app
+      - ./data:/app/data
+      - ./cache:/app/cache
+      - ./tmp:/app/tmp
+      - ./logs:/app/logs  # Explicitly mount logs directory
+    environment:
+      - PHOTO_OUTPUT_DIR=/app/outputs/photos
+      - PEXELS_API_KEY=${PEXELS_API_KEY}
+      - PEXELS_PHOTO_API_URL=https://api.pexels.com/v1/search?query=
+      - PYTHONUNBUFFERED=1  # Force Python to output without buffering
+    # Create and run the script with detailed logging
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      echo "========== STARTING TEST $(date) =========="
+      mkdir -p /app/logs /app/outputs/photos
+      
+      echo 'Creating test script with detailed logging...'
+      cat > /app/test_photo_video.py << 'EOF'
+      # Same test script content as before
+      EOF
+      
+      echo "========== RUNNING TEST SCRIPT =========="
+      python -u /app/test_photo_video.py > /app/logs/test_output.log 2>&1
+      TEST_EXIT_CODE=$?
+      
+      echo "========== TEST COMPLETE $(date) =========="
+      echo "Test exited with code: $TEST_EXIT_CODE"
+      
+      echo "Test script output:"
+      cat /app/logs/test_output.log
+      
+      # Check for log files
+      echo "Checking for log files..."
+      if [ -f "/app/logs/test_photo_video.log" ]; then
+          echo "Log file exists. Last 20 lines:"
+          tail -n 20 /app/logs/test_photo_video.log
+      else
+          echo "No log file found at /app/logs/test_photo_video.log"
+      fi
+      
+      # Look for generated videos
+      echo "Checking for generated videos..."
+      find /app/outputs -type f -name "*.mp4" 2>/dev/null || echo "No videos found"
+      
+      echo "========== TEST RESULTS SUMMARY =========="
+      if [ $TEST_EXIT_CODE -eq 0 ]; then
+          echo "✅ Test script completed successfully"
+      else
+          echo "❌ Test script failed with exit code $TEST_EXIT_CODE"
+      fi
+      
+      echo "Container will stay running for inspection. Access Streamlit at http://localhost:7502"
+      echo "To check logs: cd d:\\live\\Documents\\GitHub\\reelsmaker && type logs\\test_photo_video.log"
+      
+      # Start Streamlit, but if it fails, keep container running
+      (cd /app && streamlit run photoreelsmaker.py --server.port=7501 --server.address=0.0.0.0) || tail -f /dev/null
+      
+networks:
+  photo_test_network:
+    driver: bridge
