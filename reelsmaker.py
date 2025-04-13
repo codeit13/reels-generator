@@ -710,53 +710,110 @@ async def main():
 
 
     with st.expander("Advanced Options", expanded=False):
-        st.info("These settings will be available in future updates")
+        st.info("Enhanced options for video creation")
 
-                # Create the first row of controls for audio settings
+        # Create the first row of controls for audio settings
         audio_col1, audio_col2, audio_col3 = st.columns(3)
         
+        with audio_col1:
+            voice_provider = st.selectbox(
+                "Voice Provider",
+                options=["TikTok", "ElevenLabs", "Auto"],
+                index=0,
+                help="Select voice provider for text-to-speech"
+            )
+        
         with audio_col2:
-            pass
+            voice_speed = st.slider(
+                "Voice Speed",
+                min_value=0.5,
+                max_value=2.0,
+                value=1.0,
+                step=0.1,
+                help="Adjust the speed of the narrator's voice"
+            )
                
         with audio_col3:
             voice_style = st.selectbox(
                 "Voice Style",
-                options=["Neutral", "Cheerful", "Serious", "Excited", "Sad"],
+                options=["Neutral", "Cheerful", "Happy", "Emotional", "Curious"],
                 index=0,
-                help="Control the emotional tone of the voice (when supported)",
-                disabled=True
+                help="Control the emotional tone of the voice"
             )
         
+        # Create a new row for platform optimization
+        st.subheader("Platform Settings")
+        platform_col1, platform_col2, platform_col3 = st.columns(3)
 
-                # Add this after your audio controls row (around line 435)
-        # Create a new row for video enhancement controls
-        video_enhance_col1, video_enhance_col2, video_enhance_col3 = st.columns(3)
-
-        with video_enhance_col1:
+        with platform_col1:
             platform_preset = st.selectbox(
                 "Platform Optimization",
-                options=["TikTok", "Instagram", "YouTube Shorts", "Facebook", "LinkedIn"],
-                index=1,  # Default to Instagram
-                help="Optimize settings for specific platforms",
-                disabled=True
+                options=["Instagram", "Facebook", "YouTube"],
+                index=0,  # Default to Instagram
+                help="Optimize settings for specific platforms"
             )
 
-        with video_enhance_col2:
+        with platform_col2:
+            aspect_ratio = st.selectbox(
+                "Aspect Ratio",
+                options=["9:16 (Portrait)", "16:9 (Landscape)", "1:1 (Square)"],
+                index=0,  # Default to 9:16
+                help="Select aspect ratio for your video"
+            )
+
+        with platform_col3:
+            video_quality = st.selectbox(
+                "Video Quality",
+                options=["Standard", "High", "Ultra"],
+                index=1,  # Default to High
+                help="Higher quality means larger file size"
+            )
+            
+        # Create a new row for video effects
+        st.subheader("Visual Effects")
+        effect_col1, effect_col2, effect_col3 = st.columns(3)
+
+        with effect_col1:
             transition_effect = st.selectbox(
                 "Transition Effect",
-                options=["None", "Fade", "Dissolve", "Wipe", "Slide"],
+                options=["None", "Fade", "Dissolve", "Fireflies", "Glitch", "Slide"],
                 index=1,  # Default to Fade
-                help="Effect between video clips",
-                disabled=True
+                help="Effect between video clips"
             )
 
-        with video_enhance_col3:
-            video_mood = st.selectbox(
-                "Video Mood",
-                options=["Neutral", "Motivational", "Professional", "Dramatic", "Cheerful"],
-                index=1,  # Default to Motivational
-                help="Select mood for video content selection",
-                disabled=True
+        with effect_col2:
+            video_style = st.selectbox(
+                "Video Style",
+                options=["Normal", "CRT", "VHS", "Film Grain", "Cinematic", "Black & White"],
+                index=0,
+                help="Apply a visual style to the entire video"
+            )
+
+        with effect_col3:
+            color_grading = st.selectbox(
+                "Color Grading",
+                options=["None", "Warm", "Cool", "Vibrant", "Muted", "High Contrast"],
+                index=0,
+                help="Adjust the color profile of the video"
+            )
+            
+        # Create a new row for AI content enhancement
+        st.subheader("AI Enhancement")
+        ai_col1, ai_col2 = st.columns(2)
+
+        with ai_col1:
+            ai_content_enhancement = st.toggle(
+                "AI Content Enhancement",
+                value=True,
+                help="Use AI to enhance the quality of generated content"
+            )
+
+        with ai_col2:
+            ai_enhancement_level = st.select_slider(
+                "Enhancement Level",
+                options=["Light", "Medium", "Strong"],
+                value="Medium",
+                help="Control how much the AI modifies your content"
             )
 
         adv_col1, adv_col2 = st.columns(2)
@@ -828,10 +885,11 @@ async def main():
                     threads=int(threads),
                     cpu_preset=cpu_preset,
                     aspect_ratio=aspect_ratio_value,
-                    subtitle_max_chars=subtitle_chars
-                    # transition_effect=transition_effect,  # Add new parameters
-                    # platform_preset=platform_preset,
-                    # video_mood=video_mood
+                    subtitle_max_chars=subtitle_chars,
+                    transition_effect=transition_effect if 'transition_effect' in locals() else 'fade',
+                    platform_preset=platform_preset if 'platform_preset' in locals() else 'Instagram',
+                    video_style=video_style if 'video_style' in locals() else 'Normal',
+                    color_grading=color_grading if 'color_grading' in locals() else 'None'
                 ),
                 synth_config=SynthConfig(
                     voice=str(voice),
@@ -839,9 +897,14 @@ async def main():
                                   os.environ.get("VOICE_PROVIDER", "").lower() or 
                                   "tiktok",
                     speech_rate=speech_rate,
-                    static_mode=False  # Controls natural vs monotone speech,        # Add new parameters
-                    # voice_style=voice_style
+                    static_mode=False,  # Controls natural vs monotone speech
+                    voice_style=voice_style if 'voice_style' in locals() else 'Neutral',
+                    voice_speed=voice_speed if 'voice_speed' in locals() else 1.0
                 ),
+                ai_enhancement={
+                    "enabled": ai_content_enhancement if 'ai_content_enhancement' in locals() else True,
+                    "strength": ai_enhancement_level.lower() if 'ai_enhancement_level' in locals() else "medium"
+                },
             )
             
             # Add timestamp to the current job     
@@ -918,6 +981,7 @@ async def main():
                                 )
                 except Exception as e:
                     st.error(f"Generation failed: {e}")
+                    logger.error(f"Video generation failed: {e}")
                 finally:
                     # Cleanup regardless of success or cancellation
                     st.session_state["is_generating"] = False
