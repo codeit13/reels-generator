@@ -4,11 +4,10 @@ import multiprocessing
 import os
 import shutil
 from typing import Any, Literal
-from app.config import images_cache_path, speech_cache_path
+from app.config import settings, images_cache_path, speech_cache_path
+# from app.config import images_cache_path, speech_cache_path
 from app.utils.path_util import download_resource
 from app.utils.strings import FileClip
-
-
 from app.utils.strings import log_attempt_number
 from dotenv import load_dotenv
 from loguru import logger
@@ -18,17 +17,15 @@ from app.prompt_gen import PromptGenerator
 from app.subtitle_gen import SubtitleGenerator
 from app.synth_gen import SynthConfig, SynthGenerator
 from app.video_gen import VideoGenerator, VideoGeneratorConfig
-from pydantic import computed_field
 
+from pydantic import computed_field
 from abc import ABC
 from pydantic.json import pydantic_encoder
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 load_dotenv()
 
-
 VideoType = Literal["narrator", "motivational"]
-
 
 class TempData:
     def __init__(
@@ -77,6 +74,8 @@ class BaseGeneratorConfig(BaseModel):
     threads: int = multiprocessing.cpu_count()
     background_audio_url: str | None = None
 
+    subtitle_max_chars: int = settings.subtitle_max_chars # Load default from settings
+    
     prompt: str | None = None
     """ ai prompt to generate script """
 

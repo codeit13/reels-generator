@@ -5,7 +5,7 @@ import srt_equalizer
 from loguru import logger
 from pydantic import BaseModel
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from app.base import BaseEngine
@@ -14,17 +14,27 @@ if TYPE_CHECKING:
 class SubtitleConfig(BaseModel):
     cwd: str
     job_id: str
-    max_chars: int = 15
+    # Default is now loaded from settings via BaseGeneratorConfig,
+    # but keep a fallback default here just in case.
+    max_chars: int = 35  # Keep a fallback default
 
 
 class SubtitleGenerator:
-    def __init__(self, base_class: "BaseEngine"):
+    def __init__(self, base_class: "BaseEngine", config: Optional[SubtitleConfig] = None):  # Make config optional for compatibility
         self.base_class = base_class
-        self.config = SubtitleConfig(
-            cwd=base_class.cwd, job_id=base_class.config.job_id
-        )
+        # Use the passed config object if provided, otherwise create a default one
+        if config:
+            self.config = config
+        else:
+            # Fallback if config is not passed (e.g., from BaseEngine init)
+            self.config = SubtitleConfig(
+                cwd=base_class.cwd,
+                job_id=base_class.config.job_id,
+                # max_chars will use the default from SubtitleConfig definition
+            )
+        logger.info(f"SubtitleGenerator initialized with max_chars: {self.config.max_chars}")
 
-    async def wordify(self, srt_path: str, max_chars) -> None:
+    async def wordify(self, srt_path: str, max_chars: int) -> None:  # Keep max_chars argument here
         """Wordify the srt file, each line is a word
 
         Example:
@@ -42,7 +52,7 @@ class SubtitleGenerator:
         each day
         ----------------
         """
-
+        logger.debug(f"Running srt_equalizer with max_chars: {max_chars}")
         srt_equalizer.equalize_srt_file(srt_path, srt_path, max_chars)
 
     async def generate_subtitles(
@@ -52,14 +62,14 @@ class SubtitleGenerator:
     ) -> str:
         logger.info("Generating subtitles...")
         logger.debug(f"Starting subtitle generation with {len(sentences)} sentences")
-        
+
         if hasattr(self.base_class.config.video_gen_config, 'font_name'):
             font_name = self.base_class.config.video_gen_config.font_name
             stroke_width = self.base_class.config.video_gen_config.stroke_width
             font_name, stroke_width = validate_font_params(font_name, stroke_width)
             self.base_class.config.video_gen_config.font_name = font_name
             self.base_class.config.video_gen_config.stroke_width = stroke_width
-        
+
         subtitles_path = os.path.join(self.config.cwd, f"{self.config.job_id}.srt")
 
         subtitles = await self.locally_generate_subtitles(
@@ -69,6 +79,7 @@ class SubtitleGenerator:
             file.write(subtitles)
 
         await self.wordify(srt_path=subtitles_path, max_chars=self.config.max_chars)
+
         self.debug_subtitle_file(subtitles_path)
         logger.debug(f"Writing subtitles to {subtitles_path}")
         return subtitles_path
@@ -113,14 +124,13 @@ class SubtitleGenerator:
             logger.error(f"Error reading subtitle file: {e}")
 
 
-# Find where font parameters are used and add validation
 def validate_font_params(font_name, stroke_width):
     """Validate font parameters to prevent crashes."""
     valid_fonts = ["Arial", "Luckiest Guy", "Roboto"]
     if not font_name or font_name not in valid_fonts:
         logger.warning(f"Invalid font {font_name}, falling back to default")
         font_name = "Luckiest Guy"  # Default fallback
-    
+
     try:
         stroke_width = int(stroke_width)
         if stroke_width < 0 or stroke_width > 5:
@@ -129,6 +139,6 @@ def validate_font_params(font_name, stroke_width):
     except (ValueError, TypeError):
         logger.warning(f"Invalid stroke width value, using default")
         stroke_width = 2
-        
+
     logger.debug(f"UI stroke_width value: {stroke_width}")
     return font_name, stroke_width

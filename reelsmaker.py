@@ -12,6 +12,7 @@ from app.reels_maker import ReelsMaker, ReelsMakerConfig
 from app.synth_gen import SynthConfig
 from app.video_gen import VideoGeneratorConfig
 from streamlit.components.v1 import html
+from app.config import settings
 
 # Add this import if not already present
 import os.path
@@ -509,6 +510,16 @@ async def main():
                 help="How many background videos to download from Pexels"
             )
 
+            subtitle_chars = st.number_input(
+                "Max Chars per Subtitle Line",
+                min_value=10,
+                max_value=50,
+                value=settings.subtitle_max_chars,
+                step=1,
+                help="Controls subtitle line length. Smaller values = more lines. Affects visual wrapping."
+            )
+
+
         with vid_col2:
             # Move aspect ratio here from Video Processing Options
             aspect_ratio = st.selectbox(
@@ -654,7 +665,8 @@ async def main():
                 font_name=font_name,
                 threads=int(threads),
                 cpu_preset=cpu_preset,
-                aspect_ratio=aspect_ratio_value
+                aspect_ratio=aspect_ratio_value,
+                subtitle_max_chars=subtitle_chars
                 # transition_effect=transition_effect,  # Add new parameters
                 # platform_preset=platform_preset,
                 # video_mood=video_mood
@@ -815,7 +827,8 @@ async def main():
                     font_name=font_name,
                     threads=int(threads),
                     cpu_preset=cpu_preset,
-                    aspect_ratio=aspect_ratio_value
+                    aspect_ratio=aspect_ratio_value,
+                    subtitle_max_chars=subtitle_chars
                     # transition_effect=transition_effect,  # Add new parameters
                     # platform_preset=platform_preset,
                     # video_mood=video_mood

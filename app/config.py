@@ -50,6 +50,8 @@ class __Settings(BaseSettings):
     TOGETHER_API_KEY: str | None = Field(default=None)    
     OPENAI_MODEL_NAME: str | None = Field(default="gpt-3.5-turbo")
     # SENTRY_DSN: str | None = Field(default=None)
+    openai_api_key: str | None = Field(default=None, validation_alias='OPENAI_API_KEY')
+    subtitle_max_chars: int = Field(default=35, validation_alias='SUBTITLE_MAX_CHARS')
 
 # all ways use this settings rather than using __Settings()
 settings = __Settings()  # type: ignore

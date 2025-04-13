@@ -2,9 +2,15 @@ import os
 import sys
 import subprocess
 import asyncio
+import openai  # Add the openai import
+from openai import AsyncOpenAI  # Use the async client
 
 import ffmpeg
 from loguru import logger
+from datetime import datetime  # Add this import
+# Import your CsvLogger (adjust path if necessary)
+from app.utils.csv_logger import csv_logger  # Correct the import: Import the singleton instance, not the class
+from app.config import settings  # Import settings to access API keys/model name
 
 # Make PyTorch optional
 TORCH_AVAILABLE = False
@@ -26,6 +32,7 @@ from app.utils.strings import split_by_dot_or_newline
 from app.utils.path_util import download_resource
 from app.utils.metrics_logger import MetricsLogger
 from app.utils.video_match_logger import VideoMatchLogger
+from app.subtitle_gen import SubtitleGenerator, SubtitleConfig  # Import SubtitleConfig
 
 
 class ReelsMakerConfig(BaseGeneratorConfig):
@@ -71,16 +78,32 @@ def concatenate_clips(clips, output_path):
 
 class ReelsMaker(BaseEngine):
     def __init__(self, config: ReelsMakerConfig):
+        # --- Call super().__init__ FIRST ---
+        # This is important because BaseEngine initializes some generators
         super().__init__(config)
-        self.config = config
+        # -----------------------------------
+        self.config = config  # Store the full config
+
+        # --- Modify SubtitleGenerator Initialization ---
+        # Create a specific config object for SubtitleGenerator
+        subtitle_config_for_gen = SubtitleConfig(
+            cwd=self.cwd,  # Use self.cwd which is set in super().__init__
+            job_id=self.config.job_id,
+            max_chars=self.config.subtitle_max_chars  # Pass the value from engine config
+        )
+        # Re-initialize self.subtitle_generator with the specific config
+        # (Overwrites the one potentially created in BaseEngine.__init__)
+        self.subtitle_generator = SubtitleGenerator(
+            base_class=self,
+            config=subtitle_config_for_gen  # Pass the specific config object
+        )
+        # ---------------------------------------------
+
         self.metrics_logger = MetricsLogger(enabled=True)  # Always enable for debugging
         self.metrics_logger.initialize()
-        
-        # Add the VideoMatchLogger initialization
-        self.match_logger = VideoMatchLogger(enabled=True)  # Always enable for debugging
-        
+        self.match_logger = VideoMatchLogger(enabled=True)
         logger.debug(f"Loggers initialized - metrics: {self.metrics_logger.enabled}, match: {self.match_logger.enabled}")
-        
+
         # Ensure voice provider is properly set in synth_generator config
         if hasattr(self, 'synth_generator') and hasattr(self.synth_generator, 'config'):
             # Make sure voice_provider is explicitly set from config
@@ -90,6 +113,20 @@ class ReelsMaker(BaseEngine):
 
         # Just log that we're using CPU
         logger.info("Using CPU for processing (no CUDA)")
+
+        # Add these lines for CSV logger initialization
+        self.job_id = config.job_id  # Ensure job_id is accessible from config
+        self.pexels_logger = csv_logger  # Use the singleton instance
+        logger.info("Pexels CSV logger initialized.")
+
+        # Initialize the Async OpenAI client
+        # Access the attribute using the lowercase name matching Pydantic's convention
+        if settings.openai_api_key:
+            self.openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
+            logger.info("Async OpenAI client initialized.")
+        else:
+            self.openai_client = None
+            logger.warning("OPENAI_API_KEY not found in settings. Pexels query generation via OpenAI will be skipped.")
 
     async def _generate_script_internal(self, prompt: str) -> str:
         """Internal method to generate a script from the prompt."""
@@ -334,6 +371,17 @@ class ReelsMaker(BaseEngine):
                         voice_provider=self.config.synth_config.voice_provider,
                         voice_name=self.config.synth_config.voice
                     )
+
+                # --- Logging Call Using Singleton ---
+                # Call the *async* version of generate_pexels_query
+                pexels_search_query = await self.generate_pexels_query(sentence)  # <--- Use await here
+                if pexels_search_query:
+                    csv_logger.log_sentence_query(
+                        job_id=self.job_id,
+                        sentence=sentence,
+                        query=pexels_search_query
+                    )
+                # ------------------------------------
 
             # Filter out any None values from audio_clips
             audio_clips = [clip for clip in data if clip.synth_clip is not None]
@@ -620,3 +668,65 @@ class ReelsMaker(BaseEngine):
     async def run_processing(self, st_state):
         if self.check_cancellation(st_state):  # Fixed: use the passed st_state parameter
             raise Exception("Processing cancelled by user")
+
+    async def generate_pexels_query(self, text: str, max_retries: int = 2) -> str:
+        """
+        Generates a concise Pexels search query from the input text using OpenAI.
+        Returns the original text cleaned up if OpenAI call fails or is disabled.
+        """
+        logger.debug(f"Attempting to generate Pexels query for: '{text}' using OpenAI")
+
+        # Fallback query generation (clean up original text)
+        fallback_query = text.strip().replace("\n", " ")
+        max_len = 100
+        if len(fallback_query) > max_len:
+            fallback_query = fallback_query[:max_len].rsplit(' ', 1)[0]
+
+        if not self.openai_client:
+            logger.warning("OpenAI client not available. Returning fallback query.")
+            return fallback_query
+
+        prompt = f"""
+        Given the following sentence from a video script, generate a concise and effective search query (2-5 keywords) suitable for finding relevant background videos on Pexels. Focus on the main visual elements or concepts.
+
+        Sentence: "{text}"
+
+        Pexels Search Query:
+        """
+
+        for attempt in range(max_retries):
+            try:
+                response = await self.openai_client.chat.completions.create(
+                    model=settings.OPENAI_MODEL_NAME,  # Use model from settings
+                    messages=[
+                        {"role": "system", "content": "You are an assistant that generates concise Pexels search queries."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.5,
+                    max_tokens=20,
+                    n=1,
+                    stop=None,
+                )
+                generated_query = response.choices[0].message.content.strip().strip('"')
+                if generated_query:
+                    logger.info(f"OpenAI generated Pexels query: '{generated_query}'")
+                    return generated_query
+                else:
+                    logger.warning("OpenAI returned an empty query.")
+
+            except openai.APIConnectionError as e:
+                logger.warning(f"OpenAI API connection error (attempt {attempt + 1}/{max_retries}): {e}")
+            except openai.RateLimitError as e:
+                logger.warning(f"OpenAI API rate limit exceeded (attempt {attempt + 1}/{max_retries}): {e}")
+                await asyncio.sleep(2 ** attempt)  # Exponential backoff
+            except openai.APIStatusError as e:
+                logger.error(f"OpenAI API status error (attempt {attempt + 1}/{max_retries}): {e.status_code} - {e.response}")
+            except Exception as e:
+                logger.error(f"An unexpected error occurred during OpenAI call (attempt {attempt + 1}/{max_retries}): {e}", exc_info=True)
+
+            if attempt < max_retries - 1:
+                logger.info(f"Retrying OpenAI call...")
+                await asyncio.sleep(1)  # Wait before retrying
+
+        logger.warning("Failed to generate query via OpenAI after multiple attempts. Returning fallback query.")
+        return fallback_query

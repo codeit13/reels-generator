@@ -26,6 +26,7 @@ services:
       - KOKORO_SERVICE_URL=http://kokoro_service:8880  # URL for the service
       - PEXELS_API_KEY=${PEXELS_API_KEY}
       - MAX_BG_VIDEOS=${MAX_BG_VIDEOS}
+      - SUBTITLE_MAX_CHARS=${SUBTITLE_MAX_CHARS}      
       # CPU optimization 
       - OMP_NUM_THREADS=8
       - MKL_NUM_THREADS=8
