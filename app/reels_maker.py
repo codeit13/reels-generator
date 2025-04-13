@@ -83,6 +83,7 @@ class ReelsMaker(BaseEngine):
         super().__init__(config)
         # -----------------------------------
         self.config = config  # Store the full config
+        self.background_music_path = None  # Initialize background_music_path property
 
         # --- Modify SubtitleGenerator Initialization ---
         # Create a specific config object for SubtitleGenerator
@@ -217,15 +218,17 @@ class ReelsMaker(BaseEngine):
             # Priority order: config.video_gen_config.background_music_path first, then background_audio_url
             if self.config.video_gen_config and self.config.video_gen_config.background_music_path:
                 self.background_music_path = self.config.video_gen_config.background_music_path
-                logger.info(f"Using background music from video_gen_config: {self.background_music_path}")
-            elif self.config.background_audio_url:
-                try:
-                    self.background_music_path = await download_resource(
-                        self.cwd, self.config.background_audio_url
-                    )
-                    logger.info(f"Downloaded background music from URL: {self.background_music_path}")
-                except Exception as e:
-                    logger.error(f"Failed to download background music: {e}")
+                # If we have URL (not local path), download it
+                if self.config.background_audio_url and not self.config.background_music_path:
+                    try:
+                        self.config.background_music_path = await download_resource(
+                            self.cwd, self.config.background_audio_url
+                        )
+                        # Also set it on the instance variable for backward compatibility
+                        self.background_music_path = self.config.background_music_path
+                        logger.info(f"Downloaded background music to {self.config.background_music_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to download background music: {e}")
                     self.background_music_path = None
 
             # Set the path in video_generator config

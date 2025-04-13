@@ -242,10 +242,16 @@ class VideoGenerator:
                 effect = random.choice(effects)
                 clip = effect(clip)
                 
-            # Scale while preserving aspect ratio
-            clip = clip.filter("scale", width, height, force_original_aspect_ratio="decrease")
-            # Pad to fill the frame
-            clip = clip.filter("pad", width, height, "(ow-iw)/2", "(oh-ih)/2", color="black")
+            # For vertical videos (9:16 aspect ratio), use center-cropping instead of stretching/padding
+            if self.config.aspect_ratio == "9:16":
+                # First scale to height while preserving aspect ratio
+                clip = clip.filter("scale", -1, height)  # Scale to target height while preserving aspect ratio
+                # Then crop from center to get desired width
+                clip = clip.filter("crop", width, height, "(iw-ow)/2", 0)  # Center crop to desired width
+            else:
+                # For other aspect ratios, use the existing scale-and-pad approach
+                clip = clip.filter("scale", width, height, force_original_aspect_ratio="decrease")
+                clip = clip.filter("pad", width, height, "(ow-iw)/2", "(oh-ih)/2", color="black")
 
             # Apply color effect if needed
             if (
