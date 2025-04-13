@@ -143,13 +143,17 @@ class ReelsMaker(BaseEngine):
             elif hasattr(self.prompt_generator, 'generate_sentences'):
                 response = await self.prompt_generator.generate_sentences(prompt, max_sentences=5)
                 return " ".join(response)
+            elif hasattr(self.prompt_generator, 'generate_sentence'):
+                # Use the existing but marked as deprecated generate_sentence method
+                logger.info("Using generate_sentence method for script generation")
+                response = await self.prompt_generator.generate_sentence(prompt)
+                return response
             else:
                 # Fall back to a simple approach if none of the expected methods exist
                 logger.warning("Could not find appropriate method in prompt_generator")
                 
-                # this is the source of the duplication of prompt as entered in motivational quote
-                # return f"Let's explore {prompt}. {prompt} is something that affects us all."
-                return f"{prompt}"
+                # Create a more elaborate fallback response rather than just returning the raw prompt
+                return f"Let's explore {prompt}. {prompt} is something that affects us all."
         except Exception as e:
             logger.exception(f"Internal script generation failed: {e}")
             return ""
