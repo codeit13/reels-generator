@@ -6,6 +6,7 @@ import openai  # Add the openai import
 from openai import AsyncOpenAI  # Use the async client
 
 import ffmpeg
+from moviepy.editor import VideoFileClip
 from loguru import logger
 from datetime import datetime  # Add this import
 # Import your CsvLogger (adjust path if necessary)
@@ -463,8 +464,24 @@ class ReelsMaker(BaseEngine):
 
             tot_dur: float = 0
 
+            # Trim each video to a maximum of 5 seconds using moviepy
+            trimmed_video_paths = []
+            for video_path in video_paths:
+                try:
+                    with VideoFileClip(video_path) as video:
+                        duration = video.duration
+                        if duration > max_clip_duration:
+                            trimmed_path = video_path.replace('.mp4', '_trimmed.mp4')
+                            video.subclip(0, max_clip_duration).write_videofile(trimmed_path, codec="libx264", audio_codec="aac", verbose=False, logger=None)
+                            trimmed_video_paths.append(trimmed_path)
+                        else:
+                            trimmed_video_paths.append(video_path)
+                except Exception as e:
+                    logger.warning(f"Failed to trim video {video_path}: {e}")
+                    trimmed_video_paths.append(video_path)
+
             temp_videoclip: list[FileClip] = [
-                FileClip(video_path, t=max_clip_duration) for video_path in video_paths
+                FileClip(video_path, t=max_clip_duration) for video_path in trimmed_video_paths
             ]
 
             final_clips: list[FileClip] = []

@@ -15,11 +15,13 @@ from app.utils.strings import (
 )
 from loguru import logger
 from app.pexel import search_for_stock_videos
+from app.sakugabooru import get_random_videos_by_pattern
 from PIL import Image
 from PIL import Image as pil
 from pkg_resources import parse_version
 from pydantic import BaseModel
 import ffmpeg
+from moviepy.editor import VideoFileClip
 
 
 if parse_version(pil.__version__) >= parse_version("10.0.0"):
@@ -48,17 +50,18 @@ class VideoGeneratorConfig(BaseModel):
     subtitles_position: str = "center,center"
     threads: int = multiprocessing.cpu_count()
 
-    watermark_path_or_text: str | None = "Now Here Nowhere"
+    watermark_path_or_text: str | None = "Sleebit"
     watermark_opacity: float = 0.5
     watermark_type: Literal["image", "text", "none"] = "text"
     background_music_path: str | None = None
 
-    #aspect_ratio: str = "9:16"
+    # aspect_ratio: str = "9:16"
     aspect_ratio: str = "16:9"  # Default landspape or vertical/portrait
     """ aspect ratio of the video """
 
     color_effect: str = "gray"
-    cpu_preset: str = "ultrafast"  # Options: ultrafast, superfast, veryfast, faster, fast, medium
+    # Options: ultrafast, superfast, veryfast, faster, fast, medium
+    cpu_preset: str = "ultrafast"
 
 
 class VideoGenerator:
@@ -75,7 +78,7 @@ class VideoGenerator:
         ffmpeg_paths = [
             os.path.join(os.getcwd(), "bin/ffmpeg"),  # Local bin directory
             "/app/bin/ffmpeg",                         # Docker container path
-            "/usr/bin/ffmpeg",                         # Linux system path 
+            "/usr/bin/ffmpeg",                         # Linux system path
             "/usr/local/bin/ffmpeg",                   # macOS Homebrew path
             "ffmpeg"                                   # System PATH
         ]
@@ -95,18 +98,21 @@ class VideoGenerator:
                 break
 
         if not self.ffmpeg_cmd:
-            logger.warning("FFmpeg not found in any standard location, defaulting to 'ffmpeg'")
+            logger.warning(
+                "FFmpeg not found in any standard location, defaulting to 'ffmpeg'")
             self.ffmpeg_cmd = "ffmpeg"
-        
+
         # Add in __init__ method where you set ffmpeg_cmd
         # After checking all paths, check one more basic option
         if not self.ffmpeg_cmd:
             try:
                 # Check if ffmpeg is in the system PATH using 'which' command
-                result = subprocess.run(["which", "ffmpeg"], capture_output=True, text=True)
+                result = subprocess.run(
+                    ["which", "ffmpeg"], capture_output=True, text=True)
                 if result.returncode == 0 and result.stdout.strip():
                     self.ffmpeg_cmd = result.stdout.strip()
-                    logger.info(f"Found FFmpeg using 'which': {self.ffmpeg_cmd}")
+                    logger.info(
+                        f"Found FFmpeg using 'which': {self.ffmpeg_cmd}")
                 else:
                     # Absolute fallback
                     self.ffmpeg_cmd = "ffmpeg"
@@ -117,65 +123,78 @@ class VideoGenerator:
 
     async def get_video_url(self, search_term: str) -> str | None:
         """Get a video URL based on search term and target aspect ratio"""
-        
+
         # Map aspect ratio to orientation
         aspect_to_orientation = {
             "9:16": "portrait",
-            "16:9": "landscape", 
+            "16:9": "landscape",
             "1:1": "square"
         }
-        
+
         orientation = aspect_to_orientation.get(self.config.aspect_ratio)
         if not orientation:
-            logger.warning(f"Unknown aspect ratio: {self.config.aspect_ratio}, defaulting to landscape")
+            logger.warning(
+                f"Unknown aspect ratio: {self.config.aspect_ratio}, defaulting to landscape")
             orientation = "landscape"
-            
-        logger.info(f"Searching for {orientation} videos matching '{search_term}'")
-        
+
+        logger.info(
+            f"Searching for {orientation} videos matching '{search_term}'")
+
         try:
-            # First try with specific orientation
+            # First try Sakugabooru anime videos by pattern
+            sakuga_urls = await get_random_videos_by_pattern(pattern=search_term, limit=3)
+            if sakuga_urls:
+                logger.info(
+                    f"Found {len(sakuga_urls)} anime videos from Sakugabooru for '{search_term}'")
+                return sakuga_urls[0]
+
+            # Fallback to stock videos (pexels)
             urls = await search_for_stock_videos(
                 limit=3,
                 min_dur=10,
                 query=search_term,
                 orientation=orientation
             )
-            
+
             if urls:
-                logger.info(f"Found {len(urls)} {orientation} videos for '{search_term}'")
+                logger.info(
+                    f"Found {len(urls)} {orientation} videos for '{search_term}'")
                 return urls[0]
-                
+
             # If no results with orientation, try with a more generic search
-            logger.warning(f"No {orientation} videos found for '{search_term}'. Trying generic search...")
+            logger.warning(
+                f"No {orientation} videos found for '{search_term}'. Trying generic search...")
             urls = await search_for_stock_videos(
                 limit=3,
                 min_dur=10,
                 query=search_term
             )
-            
+
             if urls:
-                logger.warning("Using video with non-matching orientation - final video may require cropping")
+                logger.warning(
+                    "Using video with non-matching orientation - final video may require cropping")
                 return urls[0]
-                
+
             # No videos found at all - try with a generic term for the orientation
             generic_terms = {
                 "portrait": "vertical video",
                 "landscape": "landscape scene",
                 "square": "square video"
             }
-            
+
             generic_query = generic_terms.get(orientation, "nature")
-            logger.warning(f"No videos found. Trying generic '{generic_query}' search...")
-            
+            logger.warning(
+                f"No videos found. Trying generic '{generic_query}' search...")
+
             urls = await search_for_stock_videos(
                 limit=2,
                 min_dur=10,
                 query=generic_query,
                 orientation=orientation
             )
-            
+
             return urls[0] if urls else None
-            
+
         except Exception as e:
             logger.error(f"Error getting video URL: {e}")
             return None
@@ -185,10 +204,10 @@ class VideoGenerator:
         if not subtitles_path or not os.path.exists(subtitles_path):
             logger.warning(f"Subtitle file not found: {subtitles_path}")
             return video_stream
-        
+
         # Use available font helper
         font_name = self.get_available_font()
-        
+
         # Get position settings
         position = self.config.subtitles_position.split(",")[0]
         styles = {
@@ -208,11 +227,11 @@ class VideoGenerator:
         )
 
         logger.info(f"Adding subtitles with style: {style}")
-        
+
         # Apply subtitles to video stream
         return video_stream.filter(
-            "subtitles", 
-            subtitles_path, 
+            "subtitles",
+            subtitles_path,
             force_style=style
         )
 
@@ -227,31 +246,35 @@ class VideoGenerator:
 
     def concatenate_clips(self, inputs: list[FileClip], effects: list = []):
         processed_clips = []
-        
+
         # Set dimensions based on aspect ratio
         width, height = 1920, 1080  # Default 16:9
         if self.config.aspect_ratio == "9:16":
             width, height = 1080, 1920  # Portrait
         elif self.config.aspect_ratio == "1:1":
             width = height = 1080  # Square
-    
+
         for data in inputs:
             clip = data.ffmpeg_clip
 
             if len(effects) > 0:
                 effect = random.choice(effects)
                 clip = effect(clip)
-                
+
             # For vertical videos (9:16 aspect ratio), use center-cropping instead of stretching/padding
             if self.config.aspect_ratio == "9:16":
                 # First scale to height while preserving aspect ratio
-                clip = clip.filter("scale", -1, height)  # Scale to target height while preserving aspect ratio
+                # Scale to target height while preserving aspect ratio
+                clip = clip.filter("scale", -1, height)
                 # Then crop from center to get desired width
-                clip = clip.filter("crop", width, height, "(iw-ow)/2", 0)  # Center crop to desired width
+                # Center crop to desired width
+                clip = clip.filter("crop", width, height, "(iw-ow)/2", 0)
             else:
                 # For other aspect ratios, use the existing scale-and-pad approach
-                clip = clip.filter("scale", width, height, force_original_aspect_ratio="decrease")
-                clip = clip.filter("pad", width, height, "(ow-iw)/2", "(oh-ih)/2", color="black")
+                clip = clip.filter("scale", width, height,
+                                   force_original_aspect_ratio="decrease")
+                clip = clip.filter("pad", width, height,
+                                   "(ow-iw)/2", "(oh-ih)/2", color="black")
 
             # Apply color effect if needed
             if (
@@ -273,13 +296,14 @@ class VideoGenerator:
     ) -> str:
         """Generate video from clips."""
         logger.info("Generating video...")
-        
+
         # Debug the content of speech_filter to identify None values
         logger.debug(f"Speech filter type: {type(speech_filter)}")
-        
+
         # Add null checks for all file paths
         if subtitles_path is None:
-            logger.warning("Subtitle path is None, generating video without subtitles")
+            logger.warning(
+                "Subtitle path is None, generating video without subtitles")
             # Proceed without subtitles
 
         # Check each clip to ensure it has a valid path
@@ -300,11 +324,13 @@ class VideoGenerator:
 
         # In video_gen.py, inside generate_video method
         if self.config.background_music_path is None or not os.path.exists(self.config.background_music_path):
-            logger.warning(f"Background music path not found: {self.config.background_music_path}")
-            
+            logger.warning(
+                f"Background music path not found: {self.config.background_music_path}")
+
             # Create a silent audio file in the temp directory instead
-            silent_audio = os.path.join(os.path.dirname(subtitles_path), "silent_audio.mp3")
-            
+            silent_audio = os.path.join(os.path.dirname(
+                subtitles_path), "silent_audio.mp3")
+
             try:
                 # Create a silent audio file using ffmpeg
                 logger.info(f"Generating silent audio file at {silent_audio}")
@@ -326,18 +352,23 @@ class VideoGenerator:
                 # Check if file is readable and valid
                 file_size = os.path.getsize(self.config.background_music_path)
                 if file_size > 0:
-                    logger.info(f"Using background music: {self.config.background_music_path} ({file_size} bytes)")
+                    logger.info(
+                        f"Using background music: {self.config.background_music_path} ({file_size} bytes)")
                     music_input = ffmpeg.input(
-                        adjust_audio_to_target_dBFS(self.config.background_music_path),
+                        adjust_audio_to_target_dBFS(
+                            self.config.background_music_path),
                         t=video_duration,
                     )
                 else:
-                    logger.warning(f"Background music file is empty: {self.config.background_music_path}")
+                    logger.warning(
+                        f"Background music file is empty: {self.config.background_music_path}")
                     raise ValueError("Empty background music file")
             else:
                 # If no background music, generate silent audio directly with ffmpeg
-                logger.warning("Creating silent audio track directly with ffmpeg")
-                music_input = ffmpeg.input('anullsrc', f='lavfi', t=video_duration)
+                logger.warning(
+                    "Creating silent audio track directly with ffmpeg")
+                music_input = ffmpeg.input(
+                    'anullsrc', f='lavfi', t=video_duration)
         except Exception as e:
             logger.exception(f"Background music processing failed: {e}")
             # Fallback to silent audio in case of any failure
@@ -373,42 +404,15 @@ class VideoGenerator:
                 )
                 .global_args('-progress', 'pipe:1')
             )
-            
+
             # Run the encoding command
-            logger.info(f"Starting video generation with {self.config.threads} threads")
+            logger.info(
+                f"Starting video generation with {self.config.threads} threads")
             output.run(overwrite_output=True, cmd=self.ffmpeg_cmd)
-            
             return output_path
         except Exception as e:
             logger.error(f"Error during video generation: {e}")
-            # Try fallback with even lower quality settings
-            try:
-                logger.warning("Trying fallback encoding with lower quality")
-                output = (
-                    ffmpeg
-                    .output(
-                        video_stream,
-                        output_path,
-                        vcodec="libx264",
-                        acodec="aac",
-                        preset="veryfast",
-                        crf=30,
-                        pix_fmt="yuv420p",
-                        movflags="+faststart"
-                    )
-                    .global_args('-progress', 'pipe:1')
-                )
-                output.run(overwrite_output=True, cmd=self.ffmpeg_cmd)
-                return output_path
-            except Exception as fallback_error:
-                logger.error(f"Fallback encoding failed: {fallback_error}")
-                raise
-
-
-    # def get_background_audio(self, video_clip: VideoClip, song_path: str) -> AudioClip:
-    #     """Takes the original audio and adds the background audio"""
-    #     logger.info(f"Getting background music: {song_path}")
-
+            raise
     #     def adjust_audio_to_target_dBFS(audio_file_path: str, target_dBFS=-30.0):
     #         audio = AudioSegment.from_file(audio_file_path)
     #         change_in_dBFS = target_dBFS - audio.dBFS
@@ -461,7 +465,8 @@ class VideoGenerator:
     def apply_watermark(self, video_stream):
         """Adds a watermark to the bottom-right of the video."""
 
-        sysfont = os.path.join(os.getcwd(), "narrator/sys/fonts/luckiestguy.ttf")
+        sysfont = os.path.join(
+            os.getcwd(), "narrator/sys/fonts/luckiestguy.ttf")
 
         # Check if watermark path/text is set and watermark type is valid
         if (
@@ -510,7 +515,8 @@ class VideoGenerator:
         gif_path = f"{self.cwd}/{self.job_id}.gif"
 
         (
-            ffmpeg.input(master_video_path, ss=start_time, t=end_time - start_time)
+            ffmpeg.input(master_video_path, ss=start_time,
+                         t=end_time - start_time)
             .filter("fps", fps=6)
             .filter("scale", "iw/2", "ih/2")
             .output(gif_path, format="gif", loop=0, pix_fmt="rgb24")
@@ -523,7 +529,7 @@ class VideoGenerator:
         """Apply aspect ratio without requiring explicit dimensions."""
         target_ratio = self.config.aspect_ratio
         logger.info(f"Applying target aspect ratio: {target_ratio}")
-        
+
         # Set standard dimensions based on target ratio
         if target_ratio == "16:9":
             return video_stream.filter("scale", "1920", "1080", force_original_aspect_ratio="decrease").filter(
@@ -538,7 +544,8 @@ class VideoGenerator:
                 "pad", "1080", "1080", "(ow-iw)/2", "(oh-ih)/2", color="black"
             )
         else:
-            logger.warning(f"Unknown aspect ratio: {target_ratio}, using original dimensions")
+            logger.warning(
+                f"Unknown aspect ratio: {target_ratio}, using original dimensions")
             return video_stream
 
     def get_available_font(self):
@@ -551,11 +558,12 @@ class VideoGenerator:
             f"/usr/share/fonts/truetype/{self.config.font_name.lower()}/{self.config.font_name}.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",  # Fallback
         ]
-        
+
         for path in search_paths:
             if os.path.exists(path):
                 logger.info(f"Using font: {path}")
                 return path
-    
-        logger.warning(f"Font '{self.config.font_name}' not found, using default")
+
+        logger.warning(
+            f"Font '{self.config.font_name}' not found, using default")
         return "DejaVuSans-Bold"  # Default that's always available

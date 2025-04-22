@@ -373,14 +373,15 @@ async def main():
                 type=["mp3", "webm"]
             )
 
-        # Audio URL tab content
-        with audio_url_tab:
-            st.write("Enter a URL to audio you want to use")
-            st.warning("Sorry, this feature is not available yet")
-            background_audio_url = st.text_input(
-                "Enter a background audio URL", 
-                placeholder="Enter URL"
-            )
+        # Audio URL tab content (removed, not implemented)
+        # with audio_url_tab:
+        #     st.write("Enter a URL to audio you want to use")
+        #     st.warning("Sorry, this feature is not available yet")
+        #     background_audio_url = st.text_input(
+        #         "Enter a background audio URL", 
+        #         placeholder="Enter URL"
+        #     )
+        background_audio_url = None
 
         # Initialize voice provider options
         voice_providers = ["Kokoro", "Elevenlabs", "TikTok"]
@@ -529,7 +530,7 @@ async def main():
                     "Portrait (9:16) - Instagram/TikTok",             
                     "Square (1:1) - Instagram"
                 ],
-                index=0,  # Default to landscape
+                index=1,  # Default to landscape
                 help="Choose the aspect ratio based on your target platform"
             )
 
@@ -572,10 +573,10 @@ async def main():
             )
             
         with col2:
-            fontsize = st.number_input("Font size", value=200, step=5, min_value=10)
+            fontsize = st.number_input("Font size", value=120, step=5, min_value=10)
 
         with col3:
-            stroke_width = st.number_input("Border", value=4, step=1, min_value=1)
+            stroke_width = st.number_input("Border", value=1, step=1, min_value=1)
 
         # Create a new 3-column row for advanced settings
         # st.write("Advanced Settings")
@@ -583,8 +584,17 @@ async def main():
            
         with adv_col1:
             # Existing subtitle position control
-            subtitles_position = st.selectbox("Subtitle position", ["center,center"])
-           
+            subtitles_position = st.selectbox(
+                "Subtitle position",
+                [
+                    "center, center",   
+                    "left, center",
+                    "right, center",
+                    "center, top",
+                    "center, bottom",
+                ],
+                help="Position of the subtitles on the video"
+            )
         with adv_col2:
             # Auto-download toggle (boolean selectbox)
             auto_download = st.selectbox(
@@ -635,7 +645,7 @@ async def main():
             stroke_label = st.write("Stroke color")
             _, picker_col, _ = st.columns([0.25, 0.5, 0.25])
             with picker_col:
-                stroke_color = st.color_picker("##stroke_color", value="#000000", label_visibility="collapsed")
+                stroke_color = st.color_picker("##stroke_color", value="#e3e3e3", label_visibility="collapsed")
 
         aspect_ratio_value = aspect_ratio_map[aspect_ratio]
 
@@ -711,94 +721,12 @@ async def main():
 
     with st.expander("Advanced Options", expanded=False):
         st.info("Enhanced options for video creation")
-
-        # Create the first row of controls for audio settings
-        audio_col1, audio_col2, audio_col3 = st.columns(3)
-        
-        with audio_col1:
-            voice_provider = st.selectbox(
-                "Voice Provider",
-                options=["TikTok", "ElevenLabs", "Auto"],
-                index=0,
-                help="Select voice provider for text-to-speech"
-            )
-        
-        with audio_col2:
-            voice_speed = st.slider(
-                "Voice Speed",
-                min_value=0.5,
-                max_value=2.0,
-                value=1.0,
-                step=0.1,
-                help="Adjust the speed of the narrator's voice"
-            )
-               
-        with audio_col3:
-            voice_style = st.selectbox(
-                "Voice Style",
-                options=["Neutral", "Cheerful", "Happy", "Emotional", "Curious"],
-                index=0,
-                help="Control the emotional tone of the voice"
-            )
-        
-        # Create a new row for platform optimization
-        st.subheader("Platform Settings")
-        platform_col1, platform_col2, platform_col3 = st.columns(3)
-
-        with platform_col1:
-            platform_preset = st.selectbox(
-                "Platform Optimization",
-                options=["Instagram", "Facebook", "YouTube"],
-                index=0,  # Default to Instagram
-                help="Optimize settings for specific platforms"
-            )
-
-        with platform_col2:
-            aspect_ratio = st.selectbox(
-                "Aspect Ratio",
-                options=["9:16 (Portrait)", "16:9 (Landscape)", "1:1 (Square)"],
-                index=0,  # Default to 9:16
-                help="Select aspect ratio for your video"
-            )
-
-        with platform_col3:
-            video_quality = st.selectbox(
-                "Video Quality",
-                options=["Standard", "High", "Ultra"],
-                index=1,  # Default to High
-                help="Higher quality means larger file size"
-            )
-            
-        # Create a new row for video effects
-        st.subheader("Visual Effects")
-        effect_col1, effect_col2, effect_col3 = st.columns(3)
-
-        with effect_col1:
-            transition_effect = st.selectbox(
-                "Transition Effect",
-                options=["None", "Fade", "Dissolve", "Fireflies", "Glitch", "Slide"],
-                index=1,  # Default to Fade
-                help="Effect between video clips"
-            )
-
-        with effect_col2:
-            video_style = st.selectbox(
-                "Video Style",
-                options=["Normal", "CRT", "VHS", "Film Grain", "Cinematic", "Black & White"],
-                index=0,
-                help="Apply a visual style to the entire video"
-            )
-
-        with effect_col3:
-            color_grading = st.selectbox(
-                "Color Grading",
-                options=["None", "Warm", "Cool", "Vibrant", "Muted", "High Contrast"],
-                index=0,
-                help="Adjust the color profile of the video"
-            )
-            
-        # Create a new row for AI content enhancement
-        st.subheader("AI Enhancement")
+        # Remove duplicated or non-functional advanced options.
+        # If any of these are referenced in config objects, keep them. Otherwise, remove.
+        # For now, only keep advanced options that are referenced in ReelsMakerConfig, VideoGeneratorConfig, or SynthConfig.
+        # (You can add back any missing options if you find they are needed.)
+        # Example: If voice_style is not used, remove it; if platform_preset is not used, remove it, etc.
+        # (If you want to add more advanced options, do so here, but keep the UI clean and non-redundant.)
         ai_col1, ai_col2 = st.columns(2)
 
         with ai_col1:
